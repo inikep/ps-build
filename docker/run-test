@@ -3,9 +3,12 @@
 set -o errexit
 set -o xtrace
 
-ROOT_DIR=$(cd $(dirname $0)/../sources; pwd -P)
-SCRIPTS_DIR=$(cd $(dirname $0)/../local; pwd -P)
+ROOT_DIR=$(cd $(dirname $0)/..; pwd -P)
+SCRIPTS_DIR=$ROOT_DIR/local
+SOURCES_DIR=$ROOT_DIR/sources
+BUILD_DIR=$ROOT_DIR/build
 SOURCE_IMAGE=${1:-centos:7}
+mkdir $BUILD_DIR
 
 if [[ ${CI_FS_MTR} == 'yes' ]]; then
     CI_FS_DOCKER_FLAG="--mount type=bind,source=/mnt/ci_disk_dir_${CMAKE_BUILD_TYPE},destination=/tmp/ci_disk_dir"
@@ -44,12 +47,12 @@ if [[ "${KEYRING_VAULT_MTR}" == 'yes' ]]; then
     BOOTSTRAP_PROD_V1="$(bash $SCRIPTS_DIR/bootstrap-vault --mode=prod --version="${KEYRING_VAULT_V1_VERSION}" --alias=v1 --port="9300")"
     export VAULT_V1_PROD_ROOT_TOKEN=$(echo "$BOOTSTRAP_PROD_V1" | grep "Production token" | awk -F ':' '{print $2}' | xargs)
     export VAULT_V1_PROD_MTR_TOKEN=$(echo "$BOOTSTRAP_PROD_V1" | grep "MTR token" | awk -F ':' '{print $2}' | xargs)
-    sudo install --owner=1001 --group=1001 /tmp/vault.d-v1-prod/ssl/ca.pem $ROOT_DIR/vault-prod-v1-ca.pem
+    sudo install --owner=1001 --group=1001 /tmp/vault.d-v1-prod/ssl/ca.pem $SOURCES_DIR/vault-prod-v1-ca.pem
 
     BOOTSTRAP_PROD_V2="$(bash $SCRIPTS_DIR/bootstrap-vault --mode=prod --version="${KEYRING_VAULT_V2_VERSION}" --alias=v2 --port="9500")"
     export VAULT_V2_PROD_ROOT_TOKEN=$(echo "$BOOTSTRAP_PROD_V2" | grep "Production token" | awk -F ':' '{print $2}' | xargs)
     export VAULT_V2_PROD_MTR_TOKEN=$(echo "$BOOTSTRAP_PROD_V2" | grep "MTR token" | awk -F ':' '{print $2}' | xargs)
-    sudo install --owner=1001 --group=1001 /tmp/vault.d-v2-prod/ssl/ca.pem $ROOT_DIR/vault-prod-v2-ca.pem
+    sudo install --owner=1001 --group=1001 /tmp/vault.d-v2-prod/ssl/ca.pem $SOURCES_DIR/vault-prod-v2-ca.pem
 
     VAULT_DOCKER_FLAG="--network bridge-vault"
 fi
@@ -58,8 +61,9 @@ docker run --rm \
     --security-opt seccomp=unconfined \
     --sysctl net.ipv6.conf.lo.disable_ipv6=0 \
     --volume /dev/shm:/dev/shm \
-    --mount type=bind,source=${ROOT_DIR},destination=/tmp/ps \
+    --mount type=bind,source=${SOURCES_DIR},destination=/tmp/ps \
     --mount type=bind,source=${SCRIPTS_DIR},destination=/tmp/scripts \
+    --mount type=bind,source=${BUILD_DIR},destination=/tmp/results \
     ${CI_FS_DOCKER_FLAG} \
     ${VAULT_DOCKER_FLAG} \
     ${ZEN_FS_DOCKER_FLAG} \
@@ -68,7 +72,7 @@ docker run --rm \
     set -o errexit
     set -o xtrace
 
-    mkdir /tmp/results /tmp/ps_mtr_tempdir
+    mkdir /tmp/ps_mtr_tempdir
     export CMAKE_BUILD_TYPE='${CMAKE_BUILD_TYPE}'
     export WITH_GCOV='${WITH_GCOV}'
     export ANALYZER_OPTS='${ANALYZER_OPTS}'
