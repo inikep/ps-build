@@ -26,6 +26,10 @@ echo "*******************************************************"
 
 WORKDIR_ABS=$(cd ${1:-./build}; pwd -P)
 SOURCEDIR=$2
+echo "*******************************************************"
+ls -lR ${WORKDIR_ABS}
+echo "*******************************************************"
+
 rm -fr ${WORKDIR_ABS}/PS
 mkdir -p ${WORKDIR_ABS}/PS/sql
 tar -C ${WORKDIR_ABS}/PS --strip-components=1 -zxpf $(ls $WORKDIR_ABS/*.tar.gz | head -1)
@@ -182,6 +186,24 @@ if [[ $UNIT_TESTS == "1" ]]; then
     ls -la /dev/shm
     cat /proc/meminfo
     start=`date +%s`
+
+
+    pushd ${WORKDIR_ABS}/PS
+    MTR_VAULT_ADDRESS=${VAULT_V2_DEV_ADDRESS} \
+    MTR_VAULT_ADMIN_TOKEN=${VAULT_V2_DEV_ROOT_TOKEN} \
+    MTR_VAULT_PLUGIN_TOKEN=${VAULT_V2_DEV_MTR_TOKEN} \
+    MTR_VAULT_VERSION=2 \
+    ctest -j${PARALLEL} -V -R keyring_vault
+    popd
+
+    pushd ${WORKDIR_ABS}
+    MTR_VAULT_ADDRESS=${VAULT_V2_DEV_ADDRESS} \
+    MTR_VAULT_ADMIN_TOKEN=${VAULT_V2_DEV_ROOT_TOKEN} \
+    MTR_VAULT_PLUGIN_TOKEN=${VAULT_V2_DEV_MTR_TOKEN} \
+    MTR_VAULT_VERSION=2 \
+    ctest -j${PARALLEL} -V -R keyring_vault
+    popd
+
 
     MTR_BUILD_THREAD=auto ./mysql-test-run.pl \
         --parallel=${PARALLEL} \
