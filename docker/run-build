@@ -41,9 +41,8 @@ docker run --rm \
     export ZEN_FS_MTR='${ZEN_FS_MTR}'
     export DOCKER_OS='${DOCKER_OS//:/-}'
 
-    # mkdir  /tmp/results
+    sudo chown mysql:mysql /tmp/ps /tmp/results /tmp/ps/mysql-test/collections /tmp/ps/storage/rocksdb/rocksdb/util /tmp/ps/rocksdb/util /tmp/ps/storage/rocksdb/rocksdb_plugins/zenfs/fs || :
     cp -r /tmp/source_downloads /tmp/results/source_downloads
-    sudo chown mysql:mysql /tmp/ps /tmp/ps/mysql-test/collections /tmp/ps/storage/rocksdb/rocksdb/util /tmp/ps/rocksdb/util /tmp/ps/storage/rocksdb/rocksdb_plugins/zenfs/fs || :
     bash -x /tmp/scripts/build-binary /tmp/results /tmp/ps
 
     sudo rm -rf /tmp/ps/results
