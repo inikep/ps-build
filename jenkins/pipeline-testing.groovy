@@ -62,11 +62,14 @@ void downloadFilesForTests() {
     downloadFileFromS3("${BUILD_TAG_BINARIES}", "binary.tar.gz", "./sources/results/binary.tar.gz")
 }
 
-void prepareWorkspace() {
+void prepareWorkspace(Integer WORKER_ID) {
     withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', accessKeyVariable: 'AWS_ACCESS_KEY_ID', credentialsId: AWS_CREDENTIALS_ID, secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']]) {
         sh """
+            echo "prepareWorkspace for MTR worker ${WORKER_ID}"
             sudo git reset --hard
-            sudo git clean -xdf
+            if [[ "${WORKER_ID}" != "1" ]]; then
+                sudo git clean -xdf
+            fi
             rm -rf sources/results
             sudo git -C sources reset --hard || :
             sudo git -C sources clean -xdf   || :
@@ -163,7 +166,7 @@ void doTestWorkerJob(Integer WORKER_ID, String SUITES, String STANDALONE_TESTS =
         }
         git branch: JENKINS_SCRIPTS_BRANCH, url: JENKINS_SCRIPTS_REPO
         script {
-            prepareWorkspace()
+            prepareWorkspace(WORKER_ID)
             downloadFilesForTests()
             doTests(WORKER_ID.toString(), SUITES, STANDALONE_TESTS, UNIT_TESTS, CIFS_TESTS, KV_TESTS, ZENFS_TESTS, PS_PROTOCOL_TESTS)
         }
@@ -703,7 +706,7 @@ pipeline {
                 }
             }
         }
-        stage('Start ${LABEL}') {
+        stage('Wait for instance') {
             agent { label LABEL }
             stages {
                 stage('Build') {
@@ -744,7 +747,8 @@ pipeline {
                                 archiveArtifacts 'build.log.gz'
                                 sh """
                                     gunzip build.log.gz
-                                    ls | grep -xv "build.log\\|public_url" | xargs rm -rf
+                                    echo "Additional artifacts:"
+                                    ls | grep -xv "build.log\\|public_url" | xargs ls -l
                                 """
                                 recordIssues enabledForFailure: true, tools: [gcc(pattern: 'build.log')]
                             } else {
@@ -762,7 +766,7 @@ pipeline {
                 }
                 stage('Test') {
                     parallel {
-                        stage('Test - 1') {
+                        stage('Test 1') {
                             when {
                                 beforeAgent true
                                 expression { (env.WORKER_1_MTR_SUITES?.trim() || env.MTR_STANDALONE_TESTS?.trim() || env.CI_FS_MTR?.trim() == 'yes' || env.KEYRING_VAULT_MTR?.trim() == 'yes' || (ZEN_FS_MTR_SUPPORTED && (env.ZEN_FS_MTR?.trim() == 'yes')) || env.WITH_PS_PROTOCOL?.trim() == 'yes') }
@@ -772,7 +776,7 @@ pipeline {
                                 doTestWorkerJobWithGuard(1, "${WORKER_1_MTR_SUITES}", "${MTR_STANDALONE_TESTS}", true, env.CI_FS_MTR?.trim() == 'yes', env.KEYRING_VAULT_MTR?.trim() == 'yes', ZEN_FS_MTR_SUPPORTED && (env.ZEN_FS_MTR?.trim() == 'yes'), env.WITH_PS_PROTOCOL?.trim() == 'yes')
                             }
                         }
-                        stage('Test - 2') {
+                        stage('Test 2') {
                             when {
                                 beforeAgent true
                                 expression { (env.WORKER_2_MTR_SUITES?.trim()) }
@@ -782,7 +786,7 @@ pipeline {
                                 doTestWorkerJobWithGuard(2, "${WORKER_2_MTR_SUITES}")
                             }
                         }
-                        stage('Test - 3') {
+                        stage('Test 3') {
                             when {
                                 beforeAgent true
                                 expression { (env.WORKER_3_MTR_SUITES?.trim()) }
@@ -792,7 +796,7 @@ pipeline {
                                 doTestWorkerJobWithGuard(3, "${WORKER_3_MTR_SUITES}")
                             }
                         }
-                        stage('Test - 4') {
+                        stage('Test 4') {
                             when {
                                 beforeAgent true
                                 expression { (env.WORKER_4_MTR_SUITES?.trim()) }
@@ -802,7 +806,7 @@ pipeline {
                                 doTestWorkerJobWithGuard(4, "${WORKER_4_MTR_SUITES}")
                             }
                         }
-                        stage('Test - 5') {
+                        stage('Test 5') {
                             when {
                                 beforeAgent true
                                 expression { (env.WORKER_5_MTR_SUITES?.trim()) }
@@ -812,7 +816,7 @@ pipeline {
                                 doTestWorkerJobWithGuard(5, "${WORKER_5_MTR_SUITES}")
                             }
                         }
-                        stage('Test - 6') {
+                        stage('Test 6') {
                             when {
                                 beforeAgent true
                                 expression { (env.WORKER_6_MTR_SUITES?.trim()) }
@@ -822,7 +826,7 @@ pipeline {
                                 doTestWorkerJobWithGuard(6, "${WORKER_6_MTR_SUITES}")
                             }
                         }
-                        stage('Test - 7') {
+                        stage('Test 7') {
                             when {
                                 beforeAgent true
                                 expression { (env.WORKER_7_MTR_SUITES?.trim()) }
@@ -832,7 +836,7 @@ pipeline {
                                 doTestWorkerJobWithGuard(7, "${WORKER_7_MTR_SUITES}")
                             }
                         }
-                        stage('Test - 8') {
+                        stage('Test 8') {
                             when {
                                 beforeAgent true
                                 expression { (env.WORKER_8_MTR_SUITES?.trim()) }
