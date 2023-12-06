@@ -1,5 +1,5 @@
 PIPELINE_TIMEOUT = 24
-JENKINS_SCRIPTS_BRANCH = 'PS-8979-pipeline-testing'
+JENKINS_SCRIPTS_BRANCH = 'PS-8979-pipeline-testing3'
 JENKINS_SCRIPTS_REPO = 'https://github.com/inikep/ps-build'
 AWS_CREDENTIALS_ID = 'c8b933cd-b8ca-41d5-b639-33fe763d3f68'
 MAX_S3_RETRIES = 12
@@ -384,7 +384,7 @@ void triggerAbortedTestWorkersRerun() {
             echo "rerun needed: $rerunNeeded"
             if (rerunNeeded) {
                 echo "restarting aborted workers"
-                build job: 'percona-server-8.0-pipeline-testing-inikep',
+                build job: 'percona-server-8.0-pipeline-testing-inikep3',
                 wait: false,
                 parameters: [
                     string(name:'BUILD_NUMBER_BINARIES', value: BUILD_NUMBER_BINARIES_FOR_RERUN),

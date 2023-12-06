@@ -205,7 +205,7 @@
           - debian:bookworm
     builders:
     - trigger-builds:
-      - project: percona-server-8.0-pipeline-testing-inikep
+      - project: percona-server-8.0-pipeline-testing-inikep3
         current-parameters: true
         predefined-parameters: |
           DOCKER_OS=${DOCKER_OS}
@@ -218,7 +218,7 @@
     - shell: |
         sudo find . -name "*.xml" -o -name "*.log" -delete
     - copyartifact:
-        project: percona-server-8.0-pipeline-testing-inikep
+        project: percona-server-8.0-pipeline-testing-inikep3
         which-build: specific-build
         build-number: "${TRIGGERED_BUILD_NUMBERS_percona_server_8_0_pipeline_testing_inikep}"
         do-not-fingerprint: true
