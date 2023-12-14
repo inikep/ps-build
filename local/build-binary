@@ -243,5 +243,6 @@ rm -rf ${INSTALL_DIR}
 
 if [[ "${KEEP_BUILD}" != "yes" ]]; then
     rm -rf ${BUILD_DIR}
-    ls -l ${WORKDIR}
 fi
+
+ls -l ${WORKDIR}

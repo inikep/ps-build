@@ -156,14 +156,16 @@ if [[ $UNIT_TESTS == "1" ]]; then
     start=`date +%s`
 
     if [[ "${KEYRING_VAULT_MTR}" == 'yes' ]]; then
-        export MTR_VAULT_ADDRESS=${VAULT_V2_DEV_ADDRESS}
-        export MTR_VAULT_ADMIN_TOKEN=${VAULT_V2_DEV_ROOT_TOKEN}
-        export MTR_VAULT_PLUGIN_TOKEN=${VAULT_V2_DEV_MTR_TOKEN}
-        export MTR_VAULT_VERSION=2
+        MTR_VAULT_ARRAY=(
+            MTR_VAULT_ADDRESS=${VAULT_V2_DEV_ADDRESS}
+            MTR_VAULT_ADMIN_TOKEN=${VAULT_V2_DEV_ROOT_TOKEN}
+            MTR_VAULT_PLUGIN_TOKEN=${VAULT_V2_DEV_MTR_TOKEN}
+            MTR_VAULT_VERSION=2
+        )
     fi
 
     pushd ${BUILD_DIR}/mysql-test
-    MTR_BUILD_THREAD=auto ./mysql-test-run.pl \
+    env -i "${MTR_VAULT_ARRAY[@]}" MTR_BUILD_THREAD=auto ./mysql-test-run.pl \
         --parallel=${PARALLEL} \
         --result-file \
         --unit-tests-report \
@@ -222,7 +224,6 @@ fi
 
 #
 # Running MTR test cases
-status=0
 MTR_ARGS="${MTR_ARGS} --no-unit-tests"
 
 ARRAY_MTR_SUITES=($(echo $MTR_SUITES | sed 's/,/ /g'))
@@ -625,12 +626,13 @@ if [[ ${KEYRING_VAULT_MTR} == 'yes' ]]; then
     echo KH,SUITE_TOTAL,KEYRING_VAULT_tests,time,$runtime
 fi
 
+cd ${WORKDIR}
 rm -fr ${EXTRACT_DIR}/mysql-test/var
 if [[ "${KEEP_BUILD}" != "yes" ]]; then
     rm -rf ${EXTRACT_DIR}
 fi
 
-ls -l ${WORKDIR}
-sudo tar -C ${RESULTS_DIR} -czf ${RESULTS_DIR}/ps80-test-mtr_logs-${WORKER_NO}.tar.gz mtr_var
+tar -C ${RESULTS_DIR} --owner=0 --group=0 -czf "${RESULTS_DIR}/ps80-test-mtr_logs-${WORKER_NO}.tar.gz" mtr_var
 
-exit $status
+ls -l ${WORKDIR}
+ls -l ${RESULTS_DIR}
