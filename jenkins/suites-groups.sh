@@ -25,7 +25,7 @@ function set_suites() {
     echo "Setting WORKER_x_MTR_SUITES for BUILD_TYPE=RelWithDebInfo"
     # Unit tests will be executed by worker 1
     WORKER_1_MTR_SUITES="sys_vars"
-    WORKER_2_MTR_SUITES="rpl_gtid,innodb_undo,innodb_fts,perfschema,component_keyring_file,x,auth_sec,audit_log_filter,binlog,binlog_gtid,binlog_nogtid,binlog_57_decryption"
+    WORKER_2_MTR_SUITES="rpl_gtid,innodb_undo,innodb_fts,perfschema,component_keyring_file,x,auth_sec,audit_log_filter,binlog,binlog_gtid,binlog_nogtid,binlog_57_decryption,component_encryption_udf"
     WORKER_3_MTR_SUITES="rpl"
     WORKER_4_MTR_SUITES="group_replication|big"
     WORKER_5_MTR_SUITES="rocksdb,rocksdb_stress,rocksdb_rpl,rocksdb_sys_vars,clone"
@@ -36,7 +36,7 @@ function set_suites() {
     echo "Setting WORKER_x_MTR_SUITES for BUILD_TYPE=Debug"
     # Unit tests will be executed by worker 1
     WORKER_1_MTR_SUITES="sys_vars,sysschema,innodb_zip,gcol,encryption,engines/iuds,funcs_1,funcs_2,opt_trace,json,collations,query_rewrite_plugins,information_schema,federated,test_service_sql_api,gis,secondary_engine,test_services,service_sys_var_registration,connection_control,service_status_var_registration,service_udf_registration,interactive_utilities,audit_log,percona-pam-for-mysql,data_masking,component_masking_functions,procfs,rpl_encryption,audit_null,jp,stress"
-    WORKER_2_MTR_SUITES="innodb_undo,innodb_fts,perfschema,component_keyring_file,x,auth_sec,audit_log_filter,binlog,binlog_gtid,binlog_nogtid,binlog_57_decryption"
+    WORKER_2_MTR_SUITES="innodb_undo,innodb_fts,perfschema,component_keyring_file,x,auth_sec,audit_log_filter,binlog,binlog_gtid,binlog_nogtid,binlog_57_decryption,component_encryption_udf"
     WORKER_3_MTR_SUITES="rpl,rpl_gtid"
     WORKER_4_MTR_SUITES="group_replication"
     WORKER_5_MTR_SUITES="rocksdb,rocksdb_stress,rocksdb_rpl,rocksdb_sys_vars,clone"
