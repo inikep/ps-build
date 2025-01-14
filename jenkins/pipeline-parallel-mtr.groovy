@@ -511,6 +511,58 @@ else
     }
 }
 
+@NonCPS
+def fetchSlackUserId(email) {
+    try {
+        echo "Fetching Slack User ID for email: ${email}"
+        def response = slackUserIdFromEmail(email)
+        return response?.toString() ?: 'Unknown User'
+    } catch (Exception e) {
+        echo "Error fetching Slack User ID for email '${email}': ${e.message}"
+        return 'Unknown User'
+    }
+}
+
+@NonCPS
+def getUserEmail(userId) {
+    try {
+        def user = hudson.model.User.get(userId)
+        return user?.getProperty(hudson.tasks.Mailer.UserProperty)?.address ?: 'No Email Found'
+    } catch (Exception e) {
+        echo "Failed to fetch email for User ID '${userId}': ${e.message}"
+        return 'No Email Found'
+    }
+}
+
+def notifySlack(status, color, customMessage) {
+    script {
+        try {
+            def userId = currentBuild.rawBuild.getCause(hudson.model.Cause$UserIdCause)?.userId ?: 'System'
+            def email = getUserEmail(userId)
+            def slackUserId = fetchSlackUserId(email)
+
+            echo "User ID: ${userId}"
+            echo "Email: ${email}"
+            echo "Slack User ID: ${slackUserId}"
+
+            // Replace placeholders in the custom message
+            def message = customMessage
+                .replace("{status}", status)
+                .replace("{userId}", userId)
+                .replace("{email}", email)
+                .replace("{slackUserId}", slackUserId)
+                .replace("{jobName}", env.JOB_NAME)
+
+            slackSend botUser: true,
+                channel: "#${env.SLACK_CHANNEL}",
+                color: color,
+                message: message
+        } catch (Exception e) {
+            echo "Slack notification failed: ${e.message}"
+        }
+    }
+}
+
 pipeline {
     parameters {
         string(
@@ -663,6 +715,10 @@ pipeline {
             defaultValue: true,
             description: 'Rerun aborted workers',
             name: 'ALLOW_ABORTED_WORKERS_RERUN')
+	string(
+            defaultValue: '#test-jenkins',
+            description: 'Slack channel',
+            name: 'SLACK_CHANNEL')
     }
     agent {
         label 'micro-amazon'
@@ -852,6 +908,22 @@ pipeline {
         }
     }
     post {
+	success {
+            script {
+                notifySlack(currentBuild.currentResult, '#36a64f', "[{jobName}]: is {status}! :rocket: Started by {userId} ({email} / <@{slackUserId}>).")
+            }
+        }
+        failure {
+            script {
+                notifySlack(currentBuild.currentResult, '#36a64f', "[{jobName}]: has {status}! :face_with_peeking_eye: Started by {userId} ({email} / <@{slackUserId}>).")
+            }
+        }
+        aborted {
+            script {
+                def result = currentBuild.result ?: 'ABORTED'
+                notifySlack(currentBuild.currentResult, '#36a64f', "[{jobName}]: has {status}! :axe: Started by {userId} ({email} / <@{slackUserId}>).")
+            }
+        }
         always {
             triggerAbortedTestWorkersRerun()
             sh 'echo Finish: \$(date -u "+%s")'
