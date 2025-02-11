@@ -67,14 +67,14 @@ void prepareWorkspace(Integer WORKER_ID) {
         sh """
             echo "prepareWorkspace for MTR worker ${WORKER_ID}"
             sudo git reset --hard
-            if [[ "${WORKER_ID}" != "1" ]]; then
-                sudo git clean -xdf
-            else
-                # sources exists only for WORKER #1 but not for retry/re-runs
-                if [[ -d sources ]]; then
-                    sudo git -C sources reset --hard
-                    sudo git -C sources clean -xdf
-                fi
+
+            # it's safe to use "git clean" as "sources/" are ignored with ".gitignore"
+            sudo git clean -xdf
+
+            # sources exists only for WORKER #1 but not for retry/re-runs
+            if [ -d sources ]; then
+                sudo git -C sources reset --hard
+                sudo git -C sources clean -xdf
             fi
 
             if [ -f /usr/bin/yum ]; then
