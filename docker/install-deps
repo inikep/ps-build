@@ -121,10 +121,10 @@ if [ -f /usr/bin/yum ]; then
   fi
 
   PKGLIST=" \
-    gcc-c++ libtool gperf ncurses-devel perl readline-devel jemalloc zip unzip tar gzip \
+    rsync gcc-c++ libtool gperf ncurses-devel perl readline-devel jemalloc zip unzip tar gzip \
     time zlib-devel libaio-devel bison cmake pam-devel jemalloc-devel valgrind \
     perl-Time-HiRes openldap-devel perl-Env perl-Data-Dumper libicu-devel perl-Sys-MemInfo \
-    cpio perl-JSON perl-Digest perl-Digest-MD5 \
+    cpio perl-JSON perl-Digest perl-Digest-MD5 perl-XML-Parser perl-Expect perl-LWP-Protocol-https \
     numactl-devel git which make rpm-build ccache sudo libasan lz4-devel \
     libzstd-devel tzdata zstd mysql-devel perl-DBI perl-DBD-mysql jq perl-XML-Simple libcurl-devel perl-Test-Simple \
     cyrus-sasl-devel cyrus-sasl-scram krb5-devel libudev-devel python3-pip python3-devel libevent-devel \
@@ -270,13 +270,13 @@ if [ -f /usr/bin/apt-get ]; then
     done
 
     PKGLIST=" \
-        curl bison cmake perl libssl-dev gcc g++ libaio-dev libldap2-dev libwrap0-dev gdb zip unzip gawk \
+        rsync curl bison cmake perl libssl-dev gcc g++ libaio-dev libldap2-dev libwrap0-dev gdb zip unzip gawk \
         libmecab-dev libncurses5-dev libreadline-dev libpam-dev zlib1g-dev libcurl4-openssl-dev \
-        libnuma-dev libjemalloc-dev libc6-dbg valgrind libjson-perl libevent-dev pkg-config \
+        libnuma-dev libjemalloc-dev libc6-dbg valgrind libjson-perl libexpect-perl libevent-dev pkg-config \
         libmecab2 mecab mecab-ipadic git autoconf libsasl2-dev libsasl2-modules devscripts \
         debconf debhelper fakeroot po-debconf psmisc ccache libtool sudo liblz4-dev liblz4-tool libedit-dev libssl-dev \
         tzdata golang libunwind-dev zstd python3-mysqldb libdbi-perl libdbd-mysql-perl \
-        cpio jq openssl libxml-simple-perl \
+        cpio jq openssl libxml-simple-perl libxml-parser-perl \
         libsasl2-dev libsasl2-modules-gssapi-mit libkrb5-dev libudev-dev libzstd-dev libsys-meminfo-perl \
         libatomic1 \
     "
