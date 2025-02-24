@@ -1,0 +1,85 @@
+- job:
+    description: |
+        Nightly builds for perf regression testing<BR><BR>
+        <b>Do not make changes to the pipeline definition via the web interface!<br>
+        (Do not use 'Configure' option on the left for changing the pipeline definition)<br></b>
+        Change <a href="https://github.com/inikep/ps-build/blob/8.0/jenkins/perf-regressions-sm-blade04-cron.yml">perf-regressions-sm-blade04-cron.yml</a> instead.</b><br>
+        Then update pipeline with "jenkins-jobs --server ps80.cd update jenkins/perf-regressions-sm-blade04-cron.yml".
+    name: "perf-regressions-sm-blade04-cron"
+    project-type: "pipeline"
+    use-groovy-sandbox: true  # Marking "Use Groovy Sandbox"
+    concurrent: true          # Unmarking "Do not allow concurrent builds"
+    keepDependencies: false
+    triggers:
+      - timed: "0 21 * * *"
+    dsl: |
+      pipeline {
+        agent any
+        stages {
+          stage('Trigger perf-regressions-sm-blade04 Jobs') {
+            steps {
+              script {
+                def dayOfWeek = new Date().format('u', TimeZone.getTimeZone('UTC'))
+
+                if (dayOfWeek in ['7', '3']) {
+                    // Sunday, Wednesday
+                    build job: 'perf-regressions-sm-blade04', parameters: [
+                        string(name: 'PS_BRANCH', value: 'release-8.0.41-32'),
+                        string(name: 'PS_REPO_URL', value: 'https://github.com/percona/percona-server'),
+                        string(name: 'WORKLOAD_NAMES', value: 'reads,writes'),
+                        string(name: 'RUN_NAME', value: 'nightly')
+                    ]
+                } else if (dayOfWeek in ['1', '4']) {
+                    // Monday, Thursday
+                    build job: 'perf-regressions-sm-blade04', parameters: [
+                        string(name: 'PS_BRANCH', value: 'release-8.4.4-4'),
+                        string(name: 'PS_REPO_URL', value: 'https://github.com/percona/percona-server'),
+                        string(name: 'WORKLOAD_NAMES', value: 'reads,writes'),
+                        string(name: 'RUN_NAME', value: 'nightly')
+                    ]
+                } else if (dayOfWeek in ['2']) {
+                    // Tuesday
+                    build job: 'perf-regressions-sm-blade04', parameters: [
+                        string(name: 'PS_BRANCH', value: 'release-9.1.0-1'),
+                        string(name: 'PS_REPO_URL', value: 'https://github.com/percona/percona-server'),
+                        string(name: 'WORKLOAD_NAMES', value: 'reads,writes'),
+                        string(name: 'RUN_NAME', value: 'nightly')
+                    ]
+                } else if (dayOfWeek == '5') {
+                    // Friday - First build
+                    build job: 'perf-regressions-sm-blade04', parameters: [
+                        string(name: 'PS_BRANCH', value: 'release-9.1.0-1'),
+                        string(name: 'PS_REPO_URL', value: 'https://github.com/percona/percona-server'),
+                        string(name: 'WORKLOAD_NAMES', value: 'reads,writes'),
+                        string(name: 'RUN_NAME', value: 'nightly')
+                    ]
+
+                    // Friday - Second build
+                    build job: 'perf-regressions-sm-blade04', parameters: [
+                        string(name: 'PS_BRANCH', value: 'mysql-8.0.41'),
+                        string(name: 'PS_REPO_URL', value: 'https://github.com/mysql/mysql-server'),
+                        string(name: 'WORKLOAD_NAMES', value: 'reads,writes'),
+                        string(name: 'RUN_NAME', value: 'nightly')
+                    ]
+                } else if (dayOfWeek == '6') {
+                    // Saturday - First build
+                    build job: 'perf-regressions-sm-blade04', parameters: [
+                        string(name: 'PS_BRANCH', value: 'mysql-8.4.4'),
+                        string(name: 'PS_REPO_URL', value: 'https://github.com/mysql/mysql-server'),
+                        string(name: 'WORKLOAD_NAMES', value: 'reads,writes'),
+                        string(name: 'RUN_NAME', value: 'nightly')
+                    ]
+
+                    // Saturday - Second build
+                    build job: 'perf-regressions-sm-blade04', parameters: [
+                        string(name: 'PS_BRANCH', value: 'mysql-9.2.0'),
+                        string(name: 'PS_REPO_URL', value: 'https://github.com/mysql/mysql-server'),
+                        string(name: 'WORKLOAD_NAMES', value: 'reads,writes'),
+                        string(name: 'RUN_NAME', value: 'nightly')
+                    ]
+                }
+              }
+            }
+          }
+        }
+      }
