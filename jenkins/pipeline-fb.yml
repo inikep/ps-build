@@ -64,10 +64,6 @@
         name: MAKE_OPTS
         default:
         description: make options, like VERBOSE=1
-    - bool:
-        name: WITH_BORINGSSL
-        default: false
-        description: "Compile MySQL server with BoringSSL"
     - choice:
         name: DEFAULT_TESTING
         choices:

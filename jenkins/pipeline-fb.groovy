@@ -46,10 +46,6 @@ pipeline {
             defaultValue: '',
             description: 'make options, like VERBOSE=1',
             name: 'MAKE_OPTS')
-        booleanParam(
-            defaultValue: false, 
-            description: 'Compile MySQL server with BoringSSL', 
-            name: 'WITH_BORINGSSL') 
         choice(
             choices: 'yes\nno',
             description: 'Run mysql-test-run.pl',
