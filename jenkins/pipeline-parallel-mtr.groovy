@@ -222,7 +222,7 @@ void build(String SCRIPT) {
     }  // timeout
 }
 
-void setupTestSuitesSplit() {
+void setupTestSuitesSplit(String serverVersion) {
     def split_script = """#!/bin/bash
         if [[ "${FULL_MTR}" == "yes" ]]; then
             # Try to get suites split from PS repo. If not present, fallback to hardcoded.
@@ -243,7 +243,9 @@ void setupTestSuitesSplit() {
             chmod +x ${WORKSPACE}/suites-groups.sh
             set +e
             echo "Check if suites list is consistent with the one specified in mysql-test-run.pl"
-            ${WORKSPACE}/suites-groups.sh check ${WORKSPACE}/mysql-test-run.pl ${CMAKE_BUILD_TYPE}
+            source ${WORKSPACE}/suites-groups.sh
+            set_suites ${CMAKE_BUILD_TYPE} ${serverVersion}
+            check_suites ${WORKSPACE}/mysql-test-run.pl
             CHECK_RESULT=\$?
             set -e
             echo "CHECK_RESULT: \${CHECK_RESULT}"
@@ -251,13 +253,6 @@ void setupTestSuitesSplit() {
             if [[ \${CUSTOM_SPLIT} -eq 0 ]] && [[ \${CHECK_RESULT} -ne 0 ]]; then
                 echo "Default MTR split is inconsistent. Exiting."
                 exit 1
-            fi
-
-            # Set suites split definition, that is WORKER_x_MTR_SUITES
-            source ${WORKSPACE}/suites-groups.sh
-            # Call set_suites() function if exists
-            if [[ \$(type -t set_suites) == function ]]; then
-                set_suites ${CMAKE_BUILD_TYPE}
             fi
 
             echo \${WORKER_1_MTR_SUITES} > ${WORKSPACE}/worker_1.suites
@@ -423,9 +418,10 @@ void triggerAbortedTestWorkersRerun() {
     }
 }
 
-void validatePsBranch() {
+def validatePsBranch() {
     echo "Validating PS branch version"
-    sh """#!/bin/bash
+    def serverVersion = sh(
+      script: """#!/bin/bash
         MY_BRANCH_BASE_MAJOR=8
         MY_BRANCH_BASE_MINOR=0
 
@@ -459,7 +455,12 @@ void validatePsBranch() {
             exit 1
         fi
         rm -f ${WORKSPACE}/VERSION-${BUILD_NUMBER}
-    """
+        echo "\${MYSQL_VERSION_MAJOR}.\${MYSQL_VERSION_MINOR}"
+      """,
+      returnStdout: true
+    ).trim()
+
+    return serverVersion
 }
 
 // functions end here
@@ -537,6 +538,12 @@ def notifySlack(status, color, customMessage) {
 }
 
 pipeline {
+    parameters {
+        hidden(
+            name: 'LAUNCHER_USER_ID',
+            defaultValue: '',
+            description: 'Internal parameter, do not modify')
+    }
     agent {
         label 'micro-amazon'
     }
@@ -568,10 +575,11 @@ pipeline {
 
                 sh 'echo Prepare: \$(date -u "+%s")'
 
-                validatePsBranch()
-                setupTestSuitesSplit()
+                script {
+                    def serverVersion = validatePsBranch()
+                    echo "Extracted serverVersion: ${serverVersion}"
+                    setupTestSuitesSplit(serverVersion)
 
-                script{
                     env.BUILD_TAG_BINARIES = "jenkins-${env.JOB_NAME}-${env.BUILD_NUMBER_BINARIES}"
                     BUILD_NUMBER_BINARIES_FOR_RERUN = env.BUILD_NUMBER_BINARIES
                     sh 'printenv'
