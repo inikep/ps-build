@@ -1,6 +1,4 @@
 PIPELINE_TIMEOUT = 24
-JENKINS_SCRIPTS_BRANCH = '8.0'
-JENKINS_SCRIPTS_REPO = 'https://github.com/Percona-Lab/ps-build'
 AWS_CREDENTIALS_ID = 'c8b933cd-b8ca-41d5-b639-33fe763d3f68'
 MAX_S3_RETRIES = 12
 S3_ROOT_DIR = 's3://ps-build-cache'
@@ -224,7 +222,7 @@ void build(String SCRIPT) {
     }  // timeout
 }
 
-void setupTestSuitesSplit() {
+void setupTestSuitesSplit(String serverVersion) {
     def split_script = """#!/bin/bash
         if [[ "${FULL_MTR}" == "yes" ]]; then
             # Try to get suites split from PS repo. If not present, fallback to hardcoded.
@@ -245,7 +243,9 @@ void setupTestSuitesSplit() {
             chmod +x ${WORKSPACE}/suites-groups.sh
             set +e
             echo "Check if suites list is consistent with the one specified in mysql-test-run.pl"
-            ${WORKSPACE}/suites-groups.sh check ${WORKSPACE}/mysql-test-run.pl ${CMAKE_BUILD_TYPE}
+            source ${WORKSPACE}/suites-groups.sh
+            set_suites ${CMAKE_BUILD_TYPE} ${serverVersion}
+            check_suites ${WORKSPACE}/mysql-test-run.pl
             CHECK_RESULT=\$?
             set -e
             echo "CHECK_RESULT: \${CHECK_RESULT}"
@@ -253,13 +253,6 @@ void setupTestSuitesSplit() {
             if [[ \${CUSTOM_SPLIT} -eq 0 ]] && [[ \${CHECK_RESULT} -ne 0 ]]; then
                 echo "Default MTR split is inconsistent. Exiting."
                 exit 1
-            fi
-
-            # Set suites split definition, that is WORKER_x_MTR_SUITES
-            source ${WORKSPACE}/suites-groups.sh
-            # Call set_suites() function if exists
-            if [[ \$(type -t set_suites) == function ]]; then
-                set_suites ${CMAKE_BUILD_TYPE}
             fi
 
             echo \${WORKER_1_MTR_SUITES} > ${WORKSPACE}/worker_1.suites
@@ -382,7 +375,7 @@ void triggerAbortedTestWorkersRerun() {
             echo "rerun needed: $rerunNeeded"
             if (rerunNeeded) {
                 echo "restarting aborted workers"
-                build job: 'percona-server-8.0-pipeline-parallel-mtr',
+                build job: "${params.JOB_NAME}",
                 wait: false,
                 parameters: [
                     string(name:'BUILD_NUMBER_BINARIES', value: BUILD_NUMBER_BINARIES_FOR_RERUN),
@@ -395,7 +388,6 @@ void triggerAbortedTestWorkersRerun() {
                             string(name:'WITH_ROCKSDB', value: env.WITH_ROCKSDB),
                             string(name:'WITH_ROUTER', value: env.WITH_ROUTER),
                             string(name:'WITH_MYSQLX', value: env.WITH_MYSQLX),
-                            string(name:'WITH_KEYRING_VAULT', value: env.WITH_KEYRING_VAULT),
                     string(name:'CMAKE_OPTS', value: env.CMAKE_OPTS),
                     string(name:'MAKE_OPTS', value: env.MAKE_OPTS),
                     string(name:'MTR_ARGS', value: env.MTR_ARGS),
@@ -426,9 +418,10 @@ void triggerAbortedTestWorkersRerun() {
     }
 }
 
-void validatePsBranch() {
+def validatePsBranch() {
     echo "Validating PS branch version"
-    sh """#!/bin/bash
+    def serverVersion = sh(
+      script: """#!/bin/bash
         MY_BRANCH_BASE_MAJOR=8
         MY_BRANCH_BASE_MINOR=0
 
@@ -443,8 +436,8 @@ void validatePsBranch() {
                 sudo apt-get install -y jq
             fi
 
-            GIT_REPO=\$(curl -s https://api.github.com/repos/percona/percona-server/pulls/${BRANCH} | jq -r '.head.repo.html_url')
-            BRANCH=\$(curl -s https://api.github.com/repos/percona/percona-server/pulls/${BRANCH} | jq -r '.head.ref')
+            GIT_REPO=\$(curl https://api.github.com/repos/percona/percona-server/pulls/${BRANCH} | jq -r '.head.repo.html_url')
+            BRANCH=\$(curl https://api.github.com/repos/percona/percona-server/pulls/${BRANCH} | jq -r '.head.ref')
         fi
 
         RAW_VERSION_LINK=\$(echo \${GIT_REPO%.git} | sed -e "s:github.com:raw.githubusercontent.com:g")
@@ -462,7 +455,12 @@ void validatePsBranch() {
             exit 1
         fi
         rm -f ${WORKSPACE}/VERSION-${BUILD_NUMBER}
-    """
+        echo "\${MYSQL_VERSION_MAJOR}.\${MYSQL_VERSION_MINOR}"
+      """,
+      returnStdout: true
+    ).trim()
+
+    return serverVersion
 }
 
 // functions end here
@@ -515,7 +513,7 @@ def notifySlack(status, color, customMessage) {
         try {
             def userId = params.LAUNCHER_USER_ID?.trim() ? params.LAUNCHER_USER_ID : currentBuild.rawBuild.getCause(hudson.model.Cause$UserIdCause)?.userId ?: 'System'
             def email = getUserEmail(userId)
-            def slackUserId = fetchSlackUserId(email)
+	    def slackUserId = fetchSlackUserId(email)
 
             echo "User ID: ${userId}"
             echo "Email: ${email}"
@@ -527,7 +525,7 @@ def notifySlack(status, color, customMessage) {
                 .replace("{userId}", userId)
                 .replace("{email}", email)
                 .replace("{slackUserId}", slackUserId)
-                .replace("{jobName}", env.JOB_NAME)
+                .replace("{jobName}", "${env.JOB_NAME} #${env.BUILD_NUMBER}")
 
             slackSend botUser: true,
                 channel: "#${env.SLACK_CHANNEL}",
@@ -541,157 +539,7 @@ def notifySlack(status, color, customMessage) {
 
 pipeline {
     parameters {
-        string(
-            defaultValue: '',
-            description: 'Reuse binaries built in the specified build. Useful for quick MTR test rerun without rebuild.',
-            name: 'BUILD_NUMBER_BINARIES',
-            trim: true)
-        string(
-            defaultValue: 'https://github.com/percona/percona-server',
-            description: 'URL to percona-server repository',
-            name: 'GIT_REPO',
-            trim: true)
-        string(
-            defaultValue: '8.0',
-            description: 'Tag/Branch for percona-server repository',
-            name: 'BRANCH',
-            trim: true)
-        string(
-            defaultValue: '',
-            description: 'Custom string that will be appended to the build name visible in Jenkins',
-            name: 'CUSTOM_BUILD_NAME',
-            trim: true)
-        booleanParam(
-            defaultValue: false,
-            description: 'Check only if you pass PR number to BRANCH field',
-            name: 'USE_PR')
-        choice(
-            choices: 'centos:8\noraclelinux:9\nubuntu:focal\nubuntu:jammy\nubuntu:noble\ndebian:bullseye\ndebian:bookworm',
-            description: 'OS version for compilation',
-            name: 'DOCKER_OS')
-        choice(
-            choices: 'RelWithDebInfo\nDebug',
-            description: 'Type of build to produce',
-            name: 'CMAKE_BUILD_TYPE')
-        choice(
-            choices: '/usr/bin/cmake',
-            description: 'path to cmake binary',
-            name: 'JOB_CMAKE')
-        choice(
-            choices: '\n-DWITH_ASAN=ON -DWITH_ASAN_SCOPE=ON\n-DWITH_ASAN=ON\n-DWITH_ASAN=ON -DWITH_ASAN_SCOPE=ON -DWITH_UBSAN=ON\n-DWITH_ASAN=ON -DWITH_UBSAN=ON\n-DWITH_UBSAN=ON\n-DWITH_MSAN=ON\n-DWITH_VALGRIND=ON',
-            description: 'Enable code checking',
-            name: 'ANALYZER_OPTS')
-        choice(
-            choices: 'ON\nOFF',
-            description: 'Compile RocksDB engine',
-            name: 'WITH_ROCKSDB')
-        choice(
-            choices: 'ON\nOFF',
-            description: 'Whether to build MySQL Router',
-            name: 'WITH_ROUTER')
-        choice(
-            choices: 'ON\nOFF',
-            description: 'Whether to build with support for X Plugin',
-            name: 'WITH_MYSQLX')
-        choice(
-            choices: 'ON\nOFF',
-            description: 'Whether to build with support for keyring_vault Plugin',
-            name: 'WITH_KEYRING_VAULT')
-        string(
-            defaultValue: '',
-            description: 'cmake options',
-            name: 'CMAKE_OPTS')
-        string(
-            defaultValue: '',
-            description: 'make options, like VERBOSE=1',
-            name: 'MAKE_OPTS')
-        choice(
-            choices: 'yes\nno',
-            description: 'Run case-insensetive MTR tests',
-            name: 'CI_FS_MTR')
-	choice(
-            choices: 'yes\nno',
-            description: 'Run MTR tests with --ps-protocol',
-            name: 'WITH_PS_PROTOCOL')
-        string(
-            defaultValue: '--unit-tests-report --mem --big-test',
-            description: 'mysql-test-run.pl options, for options like: --big-test --only-big-test --nounit-tests --unit-tests-report',
-            name: 'MTR_ARGS')
-        string(
-            defaultValue: '1',
-            description: 'Run each test N number of times, --repeat=N',
-            name: 'MTR_REPEAT')
-        choice(
-            choices: 'no\nyes',
-            description: 'Run mtr --suite=keyring_vault',
-            name: 'KEYRING_VAULT_MTR')
-        string(
-            defaultValue: '0.9.6',
-            description: 'Specifies version of Hashicorp Vault for V1 tests',
-            name: 'KEYRING_VAULT_V1_VERSION'
-        )
-        string(
-            defaultValue: '1.9.0',
-            description: 'Specifies version of Hashicorp Vault for V2 tests',
-            name: 'KEYRING_VAULT_V2_VERSION'
-        )
-        choice(
-            choices: 'docker-32gb\ndocker',
-            description: 'Run build on specified instance type',
-            name: 'LABEL')
-        choice(
-            choices: 'yes\nno\nskip_mtr',
-            description: 'yes - full MTR\nno - run mtr suites based on variables WORKER_N_MTR_SUITES\nskip_mtr - skip testing phase. Only build.',
-            name: 'FULL_MTR')
-        string(
-            defaultValue: '',
-            description: 'Suites to be ran on worker 1 when FULL_MTR is no. Unit tests, if requested, can be ran here only!',
-            name: 'WORKER_1_MTR_SUITES')
-        string(
-            defaultValue: '',
-            description: 'Suites to be ran on worker 2 when FULL_MTR is no',
-            name: 'WORKER_2_MTR_SUITES')
-        string(
-            defaultValue: '',
-            description: 'Suites to be ran on worker 3 when FULL_MTR is no',
-            name: 'WORKER_3_MTR_SUITES')
-        string(
-            defaultValue: '',
-            description: 'Suites to be ran on worker 4 when FULL_MTR is no',
-            name: 'WORKER_4_MTR_SUITES')
-        string(
-            defaultValue: '',
-            description: 'Suites to be ran on worker 5 when FULL_MTR is no',
-            name: 'WORKER_5_MTR_SUITES')
-        string(
-            defaultValue: '',
-            description: 'Suites to be ran on worker 6 when FULL_MTR is no',
-            name: 'WORKER_6_MTR_SUITES')
-        string(
-            defaultValue: '',
-            description: 'Suites to be ran on worker 7 when FULL_MTR is no',
-            name: 'WORKER_7_MTR_SUITES')
-        string(
-            defaultValue: '',
-            description: 'Suites to be ran on worker 8 when FULL_MTR is no',
-            name: 'WORKER_8_MTR_SUITES')
-        string(
-            defaultValue: '',
-            description: 'Space-separated test names to be executed. Worker 1 handles this request.',
-            name: 'MTR_STANDALONE_TESTS')
-        string(
-            defaultValue: '1',
-            description: 'MTR workers count for standalone tests',
-            name: 'MTR_STANDALONE_TESTS_PARALLEL')
-        booleanParam(
-            defaultValue: true,
-            description: 'Rerun aborted workers',
-            name: 'ALLOW_ABORTED_WORKERS_RERUN')
-	string(
-            defaultValue: '#test-jenkins',
-            description: 'Slack channel',
-            name: 'SLACK_CHANNEL')
-	hidden(
+        hidden(
             name: 'LAUNCHER_USER_ID',
             defaultValue: '',
             description: 'Internal parameter, do not modify')
@@ -704,12 +552,13 @@ pipeline {
         skipStagesAfterUnstable()
         timeout(time: 6, unit: 'DAYS')
         buildDiscarder(logRotator(numToKeepStr: '200', artifactNumToKeepStr: '200'))
-        copyArtifactPermission('percona-server-8.0-param-parallel-mtr');
     }
     stages {
         stage('Prepare') {
             steps {
                 script {
+                    copyArtifactPermission(params.JOB_NAME);
+                    echo "JOB_NAME = ${params.JOB_NAME}"
                     echo "NODE_NAME = ${env.NODE_NAME}"
                     echo "JENKINS_SCRIPTS_BRANCH: $JENKINS_SCRIPTS_BRANCH"
                     echo "JENKINS_SCRIPTS_REPO: $JENKINS_SCRIPTS_REPO"
@@ -727,10 +576,11 @@ pipeline {
 
                 sh 'echo Prepare: \$(date -u "+%s")'
 
-                validatePsBranch()
-                setupTestSuitesSplit()
+                script {
+                    def serverVersion = validatePsBranch()
+                    echo "Extracted serverVersion: ${serverVersion}"
+                    setupTestSuitesSplit(serverVersion)
 
-                script{
                     env.BUILD_TAG_BINARIES = "jenkins-${env.JOB_NAME}-${env.BUILD_NUMBER_BINARIES}"
                     BUILD_NUMBER_BINARIES_FOR_RERUN = env.BUILD_NUMBER_BINARIES
                     sh 'printenv'

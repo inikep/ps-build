@@ -40,12 +40,10 @@ docker run -it --rm \
     export COMPILER='${COMPILER}'
     export CMAKE_BUILD_TYPE='${CMAKE_BUILD_TYPE}'
     export ANALYZER_OPTS='${ANALYZER_OPTS}'
-    export WITH_TOKUDB='${WITH_TOKUDB}'
     export WITH_ROCKSDB='${WITH_ROCKSDB}'
     export WITH_ROUTER='${WITH_ROUTER}'
     export WITH_GCOV='${WITH_GCOV}'
     export WITH_MYSQLX='${WITH_MYSQLX}'
-    export WITH_BORINGSSL='${WITH_BORINGSSL}'
     export WITH_KEYRING_VAULT='${WITH_KEYRING_VAULT}'
     export CMAKE_OPTS='${CMAKE_OPTS}'
     export MAKE_OPTS='${MAKE_OPTS}'
@@ -56,7 +54,7 @@ docker run -it --rm \
     export DOCKER_OS='${SOURCE_IMAGE}'
     export KEEP_BUILD='${KEEP_BUILD}'
 
-    sudo chown mysql:mysql /tmp/work /tmp/sources /tmp/sources/mysql-test/collections || :
+    sudo chown mysql:mysql /tmp/work /tmp/sources /tmp/sources/mysql-test/collections /tmp/sources/storage/rocksdb/rocksdb/util /tmp/sources/rocksdb/util || :
     cp -r /tmp/source_downloads /tmp/work/source_downloads
 
     echo -------------------------------------------------------------------------------
@@ -71,5 +69,5 @@ docker run -it --rm \
     bash
 
     rm -rf /tmp/work/source_downloads
-    sudo chown $(id -u):$(id -g) /tmp/work /tmp/sources /tmp/sources/mysql-test/collections || :
+    sudo chown $(id -u):$(id -g) /tmp/work /tmp/sources /tmp/sources/mysql-test/collections /tmp/sources/storage/rocksdb/rocksdb/util /tmp/sources/rocksdb/util || :
 "
