@@ -146,3 +146,39 @@ function setup_git_repo() {
     git submodule update --init --recursive
     popd
 }
+
+
+# Parses mysql-test-run.pl file and extracts the contents of the @DEFAULT_SUITES
+# array (defined using 'qw(...)'). The extracted suite names are returned as
+# a single comma-separated string.
+function extract_default_suites() {
+  local input_file=${1:-mysql-test/mysql-test-run.pl}
+  local all_suites=""
+  local capturing=0
+
+  while IFS= read -r line; do
+    if [[ "$capturing" == "1" ]]; then
+      # Stop capturing if end of array is found
+      if [[ "$line" == *");"* ]]; then
+        capturing=0
+        break
+      fi
+
+      # Remove leading/trailing whitespace and append
+      line=$(echo "$line" | xargs)
+      if [[ -n "$line" ]]; then
+        all_suites+="${line} "
+      fi
+    fi
+
+    # Start capturing after the DEFAULT_SUITES assignment
+    if [[ "$line" == *"DEFAULT_SUITES = qw("* ]]; then
+      capturing=1
+    fi
+  done < "$input_file"
+
+  # Convert whitespace-separated words to comma-separated
+  all_suites=$(echo "$all_suites" | xargs | tr ' ' ',')
+
+  echo "$all_suites"
+}

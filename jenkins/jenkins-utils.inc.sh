@@ -54,6 +54,10 @@ function build_and_run_sanitizer() {
         ./local/build-binary $WORK_DIR
     fi
 
+    if [[ -z "$MTR_SUITES" ]]; then
+        export MTR_SUITES=$(extract_default_suites sources/mysql-test/mysql-test-run.pl)
+    fi
+    echo MTR_SUITES=$MTR_SUITES
     ./local/test-binary-parallel-mtr $WORK_DIR | tee $WORK_DIR/mtr-test.log
 
     cd $WORK_DIR

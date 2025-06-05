@@ -45,6 +45,7 @@
         choices:
         - gcc-14
         - gcc-13
+        - clang-19
         description: compiler version
     - string:
         name: ANALYZER_OPTS
@@ -88,12 +89,6 @@
         - "yes"
         - "no"
         description: Run MTR tests with --ps-protocol
-    #- choice:
-    #    name: ZEN_FS_MTR
-    #    choices:
-    #    - "no"
-    #    - "yes"
-    #    description: Run ZenFS MTR tests
     - string:
         name: MTR_ARGS
         default: '{mtr_opts}'
@@ -105,8 +100,8 @@
         description: Run each test N number of times, --repeat=N
     - string:
         name: MTR_SUITES
-        default: '{mtr_suites}'
-        description: "list of MTR suites to test"
+        default: ''
+        description: "list of comma-separated MTR suites to test or if empty then test all default suites"
     - choice:
         name: SKIP_BUILD
         choices:
@@ -239,7 +234,6 @@
     branch_name: release-8.0.42-33
     sanitizer_opts: '-DWITH_ASAN=ON -DWITH_ASAN_SCOPE=ON'
     mtr_opts: --unit-tests-report --big-test --mysqld=--innodb_use_native_aio=0 --parallel=96
-    mtr_suites: "audit_null,audit_log,audit_log_filter,binlog_57_decryption,data_masking,auth_sec,binlog,binlog_gtid,binlog_nogtid,clone,collations,connection_control,encryption,federated,funcs_2,gcol,gis,information_schema,innodb,innodb_fts,innodb_gis,innodb_undo,innodb_zip,interactive_utilities,json,main,opt_trace,parts,perfschema,query_rewrite_plugins,rpl,rpl_gtid,rpl_nogtid,secondary_engine,service_status_var_registration,service_sys_var_registration,service_udf_registration,sys_vars,sysschema,test_service_sql_api,test_services,x,component_keyring_file,percona-pam-for-mysql,component_encryption_udf,component_masking_functions,procfs,rocksdb,rocksdb_rpl,rocksdb_sys_vars,rocksdb_stress,rpl_encryption,engines/iuds,engines/funcs,funcs_1,group_replication,jp,stress"
     scripts_repo: Percona-Lab/ps-build
     scripts_branch: 8.0
     jobs:
@@ -252,7 +246,6 @@
     branch_name: release-8.0.42-33
     sanitizer_opts: '-DWITH_VALGRIND=ON'
     mtr_opts: --mysqld=--innodb_use_native_aio=0 --suite-timeout=600000 --retry-failure=0 --parallel=64
-    mtr_suites: "audit_null,audit_log,audit_log_filter,binlog_57_decryption,data_masking,auth_sec,binlog,binlog_gtid,binlog_nogtid,clone,collations,connection_control,encryption,federated,funcs_2,gcol,gis,information_schema,innodb,innodb_fts,innodb_gis,innodb_undo,innodb_zip,interactive_utilities,json,main,opt_trace,parts,perfschema,query_rewrite_plugins,rpl,rpl_gtid,rpl_nogtid,secondary_engine,service_status_var_registration,service_sys_var_registration,service_udf_registration,sys_vars,sysschema,test_service_sql_api,test_services,x,component_keyring_file,percona-pam-for-mysql,component_encryption_udf,component_masking_functions,procfs,rocksdb,rocksdb_rpl,rocksdb_sys_vars,rocksdb_stress,rpl_encryption,engines/iuds,engines/funcs,funcs_1,group_replication,jp,stress"
     scripts_repo: Percona-Lab/ps-build
     scripts_branch: 8.0
     jobs:
@@ -266,7 +259,6 @@
     branch_name: release-8.4.5-5
     sanitizer_opts: '-DWITH_ASAN=ON -DWITH_ASAN_SCOPE=ON'
     mtr_opts: --unit-tests-report --big-test --mysqld=--innodb_use_native_aio=0 --parallel=96
-    mtr_suites: "audit_null,auth_sec,binlog,binlog_gtid,binlog_nogtid,clone,collations,connection_control,encryption,federated,funcs_2,gcol,gis,information_schema,innodb,innodb_fts,innodb_gis,innodb_undo,innodb_zip,interactive_utilities,json,main,opt_trace,parts,perfschema,query_rewrite_plugins,rpl,rpl_gtid,rpl_nogtid,secondary_engine,service_status_var_registration,service_sys_var_registration,service_udf_registration,sys_vars,sysschema,test_service_sql_api,test_services,x,component_keyring_file,component_audit_log_filter,component_encryption_udf,percona,percona_innodb,percona-pam-for-mysql,component_masking_functions,procfs,rocksdb,rocksdb_rpl,rocksdb_sys_vars,rocksdb_stress,rpl_encryption,engines/iuds,engines/funcs,funcs_1,group_replication,jp,stress"
     scripts_repo: Percona-Lab/ps-build
     scripts_branch: 8.0
     jobs:
@@ -279,7 +271,6 @@
     branch_name: release-8.4.5-5
     sanitizer_opts: '-DWITH_VALGRIND=ON'
     mtr_opts: --mysqld=--innodb_use_native_aio=0 --suite-timeout=600000 --retry-failure=0 --parallel=64
-    mtr_suites: "audit_null,auth_sec,binlog,binlog_gtid,binlog_nogtid,clone,collations,connection_control,encryption,federated,funcs_2,gcol,gis,information_schema,innodb,innodb_fts,innodb_gis,innodb_undo,innodb_zip,interactive_utilities,json,main,opt_trace,parts,perfschema,query_rewrite_plugins,rpl,rpl_gtid,rpl_nogtid,secondary_engine,service_status_var_registration,service_sys_var_registration,service_udf_registration,sys_vars,sysschema,test_service_sql_api,test_services,x,component_keyring_file,component_audit_log_filter,component_encryption_udf,percona,percona_innodb,percona-pam-for-mysql,component_masking_functions,procfs,rocksdb,rocksdb_rpl,rocksdb_sys_vars,rocksdb_stress,rpl_encryption,engines/iuds,engines/funcs,funcs_1,group_replication,jp,stress"
     scripts_repo: Percona-Lab/ps-build
     scripts_branch: 8.0
     jobs:
@@ -293,7 +284,6 @@
     branch_name: release-9.2.0-1
     sanitizer_opts: '-DWITH_ASAN=ON -DWITH_ASAN_SCOPE=ON'
     mtr_opts: --unit-tests-report --big-test --mysqld=--innodb_use_native_aio=0 --parallel=96
-    mtr_suites: "audit_null,auth_sec,binlog,binlog_gtid,binlog_nogtid,clone,collations,connection_control,encryption,federated,funcs_2,gcol,gis,information_schema,innodb,innodb_fts,innodb_gis,innodb_undo,innodb_zip,interactive_utilities,json,main,opt_trace,parts,perfschema,query_rewrite_plugins,rpl,rpl_gtid,rpl_nogtid,secondary_engine,service_status_var_registration,service_sys_var_registration,service_udf_registration,sys_vars,sysschema,test_service_sql_api,test_services,x,component_keyring_file,component_audit_log_filter,component_encryption_udf,percona,percona_innodb,percona-pam-for-mysql,component_masking_functions,procfs,rocksdb,rocksdb_rpl,rocksdb_sys_vars,rocksdb_stress,rpl_encryption,engines/iuds,engines/funcs,funcs_1,group_replication,jp,stress"
     scripts_repo: Percona-Lab/ps-build
     scripts_branch: 8.0
     jobs:
@@ -306,7 +296,6 @@
     branch_name: release-9.2.0-1
     sanitizer_opts: '-DWITH_VALGRIND=ON'
     mtr_opts: --mysqld=--innodb_use_native_aio=0 --suite-timeout=600000 --retry-failure=0 --parallel=64
-    mtr_suites: "audit_null,auth_sec,binlog,binlog_gtid,binlog_nogtid,clone,collations,connection_control,encryption,federated,funcs_2,gcol,gis,information_schema,innodb,innodb_fts,innodb_gis,innodb_undo,innodb_zip,interactive_utilities,json,main,opt_trace,parts,perfschema,query_rewrite_plugins,rpl,rpl_gtid,rpl_nogtid,secondary_engine,service_status_var_registration,service_sys_var_registration,service_udf_registration,sys_vars,sysschema,test_service_sql_api,test_services,x,component_keyring_file,component_audit_log_filter,component_encryption_udf,percona,percona_innodb,percona-pam-for-mysql,component_masking_functions,procfs,rocksdb,rocksdb_rpl,rocksdb_sys_vars,rocksdb_stress,rpl_encryption,engines/iuds,engines/funcs,funcs_1,group_replication,jp,stress"
     scripts_repo: Percona-Lab/ps-build
     scripts_branch: 8.0
     jobs:
