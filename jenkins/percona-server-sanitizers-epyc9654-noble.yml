@@ -1,0 +1,302 @@
+- job-template:
+    name: percona-server-{ps_version}_{sanitizer}_epyc9654-noble
+    node: 'as-1015cs-tnr'  # restricted to specific node
+    description: |
+        Builds and MTR testing for Percona Server<BR><BR>
+        <b>Do not make changes to the pipeline definition via the web interface!<br>
+        (Do not use 'Configure' option on the left for changing the pipeline definition)<br></b>
+        Change <a href="https://github.com/{scripts_repo}/blob/{scripts_branch}/jenkins/percona-server-sanitizers-epyc9654-noble.yml">percona-server-sanitizers-epyc9654-noble.yml</a>
+           and <a href="https://github.com/{scripts_repo}/blob/{scripts_branch}/jenkins/jenkins-utils.inc.sh">jenkins-utils.inc.sh</a>
+        in the <a href="https://github.com/{scripts_repo}/tree/{scripts_branch}/jenkins">git repo</a> instead.</b><br>
+        Then update pipeline with "jenkins-jobs --server ps80.cd update jenkins/percona-server-sanitizers-epyc9654-noble.yml".
+    properties:
+    - build-discarder:
+        days-to-keep: -1
+        num-to-keep: 16
+        artifact-days-to-keep: -1
+        artifact-num-to-keep: 16
+    parameters:
+    - string:
+        name: GIT_REPO
+        default: "https://github.com/percona/percona-server"
+        description: URL to percona-server repository
+    - string:
+        name: BRANCH
+        default: "{branch_name}"
+        description: Tag/Branch/Commit for percona-server repository
+    #- choice:
+    #    name: DOCKER_OS
+    #    choices:
+    #    - ubuntu-noble
+    #    description: OS version for compilation
+    - choice:
+        name: CMAKE_BUILD_TYPE
+        choices:
+        - Debug
+        - RelWithDebInfo
+        description: Type of build to produce
+    #- choice:
+    #    name: JOB_CMAKE
+    #    choices:
+    #    - /usr/bin/cmake
+    #    description: path to cmake binary
+    - choice:
+        name: COMPILER
+        choices:
+        - gcc-14
+        - gcc-13
+        - clang-19
+        description: compiler version
+    - string:
+        name: ANALYZER_OPTS
+        default: '{sanitizer_opts}'
+        description: 'Analyzer options for the build'
+    - choice:
+        name: WITH_ROCKSDB
+        choices:
+        - "ON"
+        - "OFF"
+        description: Compile RocksDB engine
+    - choice:
+        name: WITH_ROUTER
+        choices:
+        - "ON"
+        - "OFF"
+        description: Whether to build MySQL Router
+    - choice:
+        name: WITH_MYSQLX
+        choices:
+        - "ON"
+        - "OFF"
+        description: Whether to build with support for X Plugin
+    - string:
+        name: CMAKE_OPTS
+        default: "-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DROCKSDB_DISABLE_MARCH_NATIVE=1"
+        description: cmake options
+    - string:
+        name: MAKE_OPTS
+        default: "-j96"
+        description: make options, like VERBOSE=1
+    #- choice:
+    #    name: CI_FS_MTR
+    #    choices:
+    #    - "yes"
+    #    - "no"
+    #    description: Run case-insensetive MTR tests
+    - choice:
+        name: WITH_PS_PROTOCOL
+        choices:
+        - "yes"
+        - "no"
+        description: Run MTR tests with --ps-protocol
+    - string:
+        name: MTR_ARGS
+        default: '{mtr_opts}'
+        description: |
+            mysql-test-run.pl options, for options like: --big-test --only-big-test --nounit-tests --unit-tests-report
+    - string:
+        name: MTR_REPEAT
+        default: "1"
+        description: Run each test N number of times, --repeat=N
+    - string:
+        name: MTR_SUITES
+        default: ''
+        description: "list of comma-separated MTR suites to test or if empty then test all default suites"
+    - choice:
+        name: SKIP_BUILD
+        choices:
+        - "no"
+        - "yes"
+        description: "skip build and use binaries from the last build"
+    - choice:
+        name: KEEP_BUILD
+        choices:
+        - "no"
+        - "yes"
+        description: "should we keep intermediate build files (can be accessed with SSH to the server)"
+    #- choice:
+    #    name: WITH_KEYRING_VAULT
+    #    choices:
+    #    - "ON"
+    #    - "OFF"
+    #    description: Whether to build with support for keyring_vault Plugin
+    #- choice:
+    #    name: KEYRING_VAULT_MTR
+    #    choices:
+    #    - "no"
+    #    - "yes"
+    #    description: Run mtr --suite=keyring_vault
+    #- string:
+    #    name: KEYRING_VAULT_V1_VERSION
+    #    default: "0.9.6"
+    #    description: Specifies version of Hashicorp Vault for V1 tests
+    #- string:
+    #    name: KEYRING_VAULT_V2_VERSION
+    #    default: "1.9.0"
+    #    description: Specifies version of Hashicorp Vault for V2 tests
+    - string:
+        name: PS_BUILD_REPO
+        default: 'https://github.com/{scripts_repo}'
+        description: URL to ps-build repository
+    - string:
+        name: PS_BUILD_BRANCH
+        default: '{scripts_branch}'
+        description: Tag/Branch/Commit for ps-build repository
+    can_roam: false
+    disabled: false
+    block_build_when_downstream_building: false
+    block_build_when_upstream_building: false
+    triggers: []
+    concurrent_build: false
+    builders:
+      - shell:
+          command: |
+            #!/bin/bash
+            uname -a
+            df -h
+            echo WORKSPACE=$WORKSPACE
+            pwd
+            ls -la
+            rm -rf *
+
+            # Change aio-max-nr
+            cat /proc/sys/fs/aio-max-nr
+            sudo sysctl -w fs.aio-max-nr=1048576
+            cat /proc/sys/fs/aio-max-nr
+
+            ulimit -n
+            ulimit -n 1048576
+            ulimit -n
+
+            export WORKER_NO=1
+            export DOCKER_OS=ubuntu-noble
+
+            # Display the user and the environment variables
+            echo "User: $(whoami) USER=$USER"
+            echo GIT_REPO=$GIT_REPO
+            echo BRANCH=$BRANCH
+            echo DOCKER_OS=$DOCKER_OS
+            echo CMAKE_BUILD_TYPE=$CMAKE_BUILD_TYPE
+            echo JOB_CMAKE=$JOB_CMAKE
+            echo ANALYZER_OPTS=$ANALYZER_OPTS
+            echo WITH_ROCKSDB=$WITH_ROCKSDB
+            echo WITH_ROUTER=$WITH_ROUTER
+            echo WITH_MYSQLX=$WITH_MYSQLX
+            echo CMAKE_OPTS=$CMAKE_OPTS
+            echo MAKE_OPTS=$MAKE_OPTS
+            echo CI_FS_MTR=$CI_FS_MTR
+            echo WITH_PS_PROTOCOL=$WITH_PS_PROTOCOL
+            echo ZEN_FS_MTR=$ZEN_FS_MTR
+            echo MTR_ARGS=$MTR_ARGS
+            echo MTR_REPEAT=$MTR_REPEAT
+            echo MTR_SUITES=$MTR_SUITES
+            echo SKIP_BUILD=$SKIP_BUILD
+            # echo WITH_KEYRING_VAULT=$WITH_KEYRING_VAULT
+            # echo KEYRING_VAULT_MTR=$KEYRING_VAULT_MTR
+            # echo KEYRING_VAULT_V1_VERSION=$KEYRING_VAULT_V1_VERSION
+            # echo KEYRING_VAULT_V2_VERSION=$KEYRING_VAULT_V2_VERSION
+            echo PS_BUILD_REPO=$PS_BUILD_REPO
+            echo PS_BUILD_BRANCH=$PS_BUILD_BRANCH
+
+            export PS_BUILD_DIR=/mnt/storage2/ps-build
+            export WORK_DIR=/mnt/storage2/ps-build-$PS_BUILD_BRANCH-workspace
+
+            wget https://raw.githubusercontent.com/{scripts_repo}/refs/heads/{scripts_branch}/local/utils.inc.sh
+            wget https://raw.githubusercontent.com/{scripts_repo}/refs/heads/{scripts_branch}/jenkins/jenkins-utils.inc.sh
+            source ./utils.inc.sh
+            source ./jenkins-utils.inc.sh
+            build_and_run_sanitizer
+            cd $WORKSPACE
+            rm -f utils.inc.sh jenkins-utils.inc.sh
+            ls -la
+
+    publishers:
+      - junit:
+          results: '*.xml'
+          keep-long-stdio: true
+          health-scale-factor: 1.0
+          allow-empty-results: false
+      - archive:
+          artifacts: "*.tar.gz, *.log*, *.txt, *.xml"
+          allow_empty_archive: false
+          only_if_successful: false
+          fingerprint: false
+          default_excludes: true
+          case_sensitive: true
+          follow_symlinks: false
+    build_wrappers: []
+
+
+- project:
+    name: ASAN-8.0
+    sanitizer: ASAN
+    ps_version: 8.0
+    branch_name: release-8.0.42-33
+    sanitizer_opts: '-DWITH_ASAN=ON -DWITH_ASAN_SCOPE=ON'
+    mtr_opts: --unit-tests-report --big-test --mysqld=--innodb_use_native_aio=0 --parallel=96
+    scripts_repo: Percona-Lab/ps-build
+    scripts_branch: 8.0
+    jobs:
+      - percona-server-{ps_version}_{sanitizer}_epyc9654-noble
+
+- project:
+    name: VALGRIND-8.0
+    sanitizer: VALGRIND
+    ps_version: 8.0
+    branch_name: release-8.0.42-33
+    sanitizer_opts: '-DWITH_VALGRIND=ON'
+    mtr_opts: --mysqld=--innodb_use_native_aio=0 --suite-timeout=600000 --retry-failure=0 --parallel=64
+    scripts_repo: Percona-Lab/ps-build
+    scripts_branch: 8.0
+    jobs:
+      - percona-server-{ps_version}_{sanitizer}_epyc9654-noble
+
+
+- project:
+    name: ASAN-8.4
+    sanitizer: ASAN
+    ps_version: 8.4
+    branch_name: release-8.4.5-5
+    sanitizer_opts: '-DWITH_ASAN=ON -DWITH_ASAN_SCOPE=ON'
+    mtr_opts: --unit-tests-report --big-test --mysqld=--innodb_use_native_aio=0 --parallel=96
+    scripts_repo: Percona-Lab/ps-build
+    scripts_branch: 8.0
+    jobs:
+      - percona-server-{ps_version}_{sanitizer}_epyc9654-noble
+
+- project:
+    name: VALGRIND-8.4
+    sanitizer: VALGRIND
+    ps_version: 8.4
+    branch_name: release-8.4.5-5
+    sanitizer_opts: '-DWITH_VALGRIND=ON'
+    mtr_opts: --mysqld=--innodb_use_native_aio=0 --suite-timeout=600000 --retry-failure=0 --parallel=64
+    scripts_repo: Percona-Lab/ps-build
+    scripts_branch: 8.0
+    jobs:
+      - percona-server-{ps_version}_{sanitizer}_epyc9654-noble
+
+
+- project:
+    name: ASAN-9.x
+    sanitizer: ASAN
+    ps_version: 9.x
+    branch_name: release-9.2.0-1
+    sanitizer_opts: '-DWITH_ASAN=ON -DWITH_ASAN_SCOPE=ON'
+    mtr_opts: --unit-tests-report --big-test --mysqld=--innodb_use_native_aio=0 --parallel=96
+    scripts_repo: Percona-Lab/ps-build
+    scripts_branch: 8.0
+    jobs:
+      - percona-server-{ps_version}_{sanitizer}_epyc9654-noble
+
+- project:
+    name: VALGRIND-9.x
+    sanitizer: VALGRIND
+    ps_version: 9.x
+    branch_name: release-9.2.0-1
+    sanitizer_opts: '-DWITH_VALGRIND=ON'
+    mtr_opts: --mysqld=--innodb_use_native_aio=0 --suite-timeout=600000 --retry-failure=0 --parallel=64
+    scripts_repo: Percona-Lab/ps-build
+    scripts_branch: 8.0
+    jobs:
+      - percona-server-{ps_version}_{sanitizer}_epyc9654-noble
