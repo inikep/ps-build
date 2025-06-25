@@ -1,3 +1,35 @@
+library changelog: false, identifier: "lib@master", retriever: modernSCM([
+    $class: 'GitSCMSource',
+    remote: 'https://github.com/Percona-Lab/jenkins-pipelines.git'
+])
+
+// Cache configuration constants
+// These values are hardcoded based on team requirements:
+// - CCACHE_MAXSIZE: 8GB is sufficient for all build types including sanitizers
+// - Retention: 60 days for normal builds, 120 days for ASAN/Valgrind builds
+// 
+// These constants override the default retention values in the ccacheUpload shared library:
+// - CACHE_RETENTION_DAYS_NORMAL: Used for standard builds
+// - CACHE_RETENTION_DAYS_SANITIZER: Used for ASAN/Valgrind builds (tested once per 90-day release cycle)
+//
+// S3 Lifecycle Configuration Requirements:
+// The S3 bucket must have lifecycle rules configured with tag-based expiration:
+// - Tag "RetentionDays" = "60" → Expire after 60 days
+// - Tag "RetentionDays" = "120" → Expire after 120 days
+// These tags are automatically set by ccacheUpload() based on the cacheRetentionDays parameter.
+// For configuration details, see PKG-769.
+//
+// Note for Hetzner Object Storage:
+// Hetzner S3-compatible storage supports lifecycle policies but with limitations:
+// - Tag-based rules are NOT supported - only prefix-based or bucket-wide rules
+// - Lifecycle policies require versioning to be either disabled or enabled (not suspended)
+// - Current implementation uses tag-based retention which won't work on Hetzner
+// - TODO: Implement prefix-based paths for Hetzner with expiry dates (e.g., /ccache/60d/, /ccache/120d/)
+//         to enable automatic object expiration via Hetzner lifecycle policies
+final String CCACHE_MAXSIZE = '8G'
+final int CACHE_RETENTION_DAYS_NORMAL = 60
+final int CACHE_RETENTION_DAYS_SANITIZER = 120
+
 PIPELINE_TIMEOUT = 24
 AWS_CREDENTIALS_ID = 'c8b933cd-b8ca-41d5-b639-33fe763d3f68'
 MAX_S3_RETRIES = 12
@@ -208,7 +240,7 @@ void build(String SCRIPT) {
                     if [ \$(docker ps -q | wc -l) -ne 0 ]; then
                         docker ps -q | xargs docker stop --time 1 || :
                     fi
-                    eval KEEP_BUILD=yes ${SCRIPT} ${DOCKER_OS} ${WORKSPACE}/${WORK_DIR}
+                    eval USE_CCACHE=yes CCACHE_MAXSIZE=${CCACHE_MAXSIZE} KEEP_BUILD=yes ${SCRIPT} ${DOCKER_OS} ${WORKSPACE}/${WORK_DIR}
                 " 2>&1 | tee build.log
 
                 echo Archive build log: \$(date -u "+%s")
@@ -576,6 +608,7 @@ pipeline {
                     if (BUILD_TRIGGER_BY == " (null)") {
                         BUILD_TRIGGER_BY = " "
                     }
+                    
                     currentBuild.displayName = "${BUILD_NUMBER} ${CMAKE_BUILD_TYPE}/${DOCKER_OS}${BUILD_TRIGGER_BY} ${CUSTOM_BUILD_NAME}"
                 }
 
@@ -606,7 +639,86 @@ pipeline {
                         git branch: JENKINS_SCRIPTS_BRANCH, url: JENKINS_SCRIPTS_REPO
 
                         checkoutSources()
+
+                        script {
+                            // Set BUILD_PARAMS_TYPE based on ANALYZER_OPTS
+                            if (env.ANALYZER_OPTS) {
+                                if (env.ANALYZER_OPTS.contains('ASAN')) {
+                                    env.BUILD_PARAMS_TYPE = 'asan'
+                                } else if (env.ANALYZER_OPTS.contains('VALGRIND')) {
+                                    env.BUILD_PARAMS_TYPE = 'valgrind'
+                                } else if (env.ANALYZER_OPTS.contains('UBSAN')) {
+                                    env.BUILD_PARAMS_TYPE = 'ubsan'
+                                } else if (env.ANALYZER_OPTS.contains('MSAN')) {
+                                    env.BUILD_PARAMS_TYPE = 'msan'
+                                } else {
+                                    env.BUILD_PARAMS_TYPE = 'standard'
+                                }
+                            } else {
+                                env.BUILD_PARAMS_TYPE = 'standard'
+                            }
+
+
+                            // Extract compiler version for ccache key
+                            def CC_COMPILER = env.CC ?: 'gcc'
+
+                            env.COMPILER_VERSION = sh(returnStdout: true, script: """
+                                COMPILER="${CC_COMPILER}"
+                                if [[ "\$COMPILER" == *"clang"* ]]; then
+                                    \$COMPILER --version | grep -o "clang version.*" | awk '{print \$3}'
+                                else
+                                    # For gcc, use -v to get consistent version format
+                                    \$COMPILER -v 2>&1 | tail -1 | awk '{print \$3}'
+                                fi || echo ''
+                            """).trim()
+
+                            // Create TOOLSET variable combining compiler and version
+                            if ("${CC_COMPILER}".contains("clang")) {
+                                env.TOOLSET = "clang-${env.COMPILER_VERSION}"
+                            } else {
+                                env.TOOLSET = "gcc-${env.COMPILER_VERSION}"
+                            }
+
+                            echo "COMPILER: ${env.COMPILER}"
+                            echo "CC_COMPILER: ${CC_COMPILER}"
+                            echo "COMPILER_VERSION: ${env.COMPILER_VERSION}"
+                            echo "TOOLSET: ${env.TOOLSET}"
+
+                        }
+
+                        // Download ccache using shared library
+                        ccacheDownload([
+                            awsCredentialsId: AWS_CREDENTIALS_ID,
+                            buildParamsType: env.BUILD_PARAMS_TYPE,
+                            cloud: params.CLOUD,
+                            cmakeBuildType: env.CMAKE_BUILD_TYPE,
+                            dockerOs: env.DOCKER_OS,
+                            forceCacheMiss: env.FORCE_CACHE_MISS == 'true',
+                            serverVersion: SERVER_VERSION,
+                            s3Bucket: S3_ROOT_DIR + '/',
+                            toolset: env.TOOLSET,
+                            workspace: env.WORKSPACE
+                        ])
+
                         build("./docker/run-build")
+
+                        // Upload ccache using shared library
+                        // Determine retention days based on build type
+                        def retentionDays = (env.BUILD_PARAMS_TYPE in ['asan', 'valgrind']) ? 
+                            CACHE_RETENTION_DAYS_SANITIZER : CACHE_RETENTION_DAYS_NORMAL
+                        
+                        ccacheUpload([
+                            awsCredentialsId: AWS_CREDENTIALS_ID,
+                            buildParamsType: env.BUILD_PARAMS_TYPE,
+                            cacheRetentionDays: retentionDays,
+                            cloud: params.CLOUD,
+                            cmakeBuildType: env.CMAKE_BUILD_TYPE,
+                            dockerOs: env.DOCKER_OS,
+                            serverVersion: SERVER_VERSION,
+                            s3Bucket: S3_ROOT_DIR + '/',
+                            toolset: env.TOOLSET,
+                            workspace: env.WORKSPACE
+                        ])
 
                         script {
                             boolean archive_public_url = false
@@ -739,7 +851,7 @@ pipeline {
         }
     }
     post {
-	success {
+    success {
             script {
                 notifySlack(currentBuild.currentResult, '#36a64f', "[{jobName}]: is {status}! :rocket: Started by {userId} ({email} / <@{slackUserId}>).")
             }
