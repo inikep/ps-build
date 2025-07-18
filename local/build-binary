@@ -111,6 +111,7 @@ if [[ "${CMAKE_BUILD_TYPE}" = "Debug" ]]; then
 fi
 if [[ "${ANALYZER_OPTS}" = *WITH_VALGRIND=ON* ]]; then
     BUILD_COMMENT+="-valgrind"
+    CMAKE_OPTS+=" -DROCKSDB_DISABLE_MARCH_NATIVE=1"
 fi
 
 # ------------------------------------------------------------------------------

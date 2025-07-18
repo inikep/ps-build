@@ -29,8 +29,8 @@
         description: URL to percona-server repository
     - string:
         name: BRANCH
-        default: ""
-        description: Tag/Branch for percona-server repository
+        default: "{branch_name}"
+        description: Tag/Branch/Commit for percona-server repository
     - string:
         name: CUSTOM_BUILD_NAME
         default: ""
@@ -46,8 +46,8 @@
     - choice:
         name: CMAKE_BUILD_TYPE
         choices:
-        - RelWithDebInfo
         - Debug
+        - RelWithDebInfo
         description: Type of build to produce
     - choice:
         name: JOB_CMAKE
@@ -59,15 +59,7 @@
         description: compiler version e.g. gcc-15 or clang-20 or use default system compiler if empty
     - choice:
         name: ANALYZER_OPTS
-        choices:
-        -
-        - -DWITH_ASAN=ON -DWITH_ASAN_SCOPE=ON
-        - -DWITH_ASAN=ON
-        - -DWITH_ASAN=ON -DWITH_ASAN_SCOPE=ON -DWITH_UBSAN=ON
-        - -DWITH_ASAN=ON -DWITH_UBSAN=ON
-        - -DWITH_UBSAN=ON
-        - -DWITH_MSAN=ON
-        - -DWITH_VALGRIND=ON
+        choices: '{sanitizer_opts_list}'
         description: Enable code checking
     - choice:
         name: WITH_ROCKSDB
@@ -109,7 +101,7 @@
         description: Run MTR tests with --ps-protocol
     - string:
         name: MTR_ARGS
-        default: --unit-tests-report --mem --big-test
+        default: '{mtr_opts}'
         description: "mysql-test-run.pl options, for options like: --big-test --only-big-test --nounit-tests --unit-tests-report"
     - string:
         name: MTR_REPEAT
@@ -212,6 +204,8 @@
 - project:
     name: pipeline-parallel-mtr-8.0
     ps_version: 8.0
+    branch_name: '8.0'
+    mtr_opts: --unit-tests-report --mem --big-test
     scripts_repo: https://github.com/Percona-Lab/ps-build
     scripts_branch: '8.0'
     docker_os_list:
@@ -222,12 +216,16 @@
       - ubuntu:noble
       - debian:bullseye
       - debian:bookworm
+    sanitizer_opts_list:
+      -
     jobs:
       - percona-server-{ps_version}-pipeline-parallel-mtr
 
 - project:
     name: pipeline-parallel-mtr-8.x
     ps_version: 8.x
+    branch_name: '8.4'
+    mtr_opts: --unit-tests-report --mem --big-test
     scripts_repo: https://github.com/Percona-Lab/ps-build
     scripts_branch: '8.0'
     docker_os_list:
@@ -238,12 +236,16 @@
       - ubuntu:noble
       - debian:bullseye
       - debian:bookworm
+    sanitizer_opts_list:
+      -
     jobs:
       - percona-server-{ps_version}-pipeline-parallel-mtr
 
 - project:
     name: pipeline-parallel-mtr-9.x
     ps_version: 9.x
+    branch_name: 'trunk'
+    mtr_opts: --unit-tests-report --mem --big-test
     scripts_repo: https://github.com/Percona-Lab/ps-build
     scripts_branch: '8.0'
     docker_os_list:
@@ -252,5 +254,28 @@
       - ubuntu:jammy
       - ubuntu:noble
       - debian:bookworm
+    sanitizer_opts_list:
+      -
+    jobs:
+      - percona-server-{ps_version}-pipeline-parallel-mtr
+
+- project:
+    name: pipeline-parallel-mtr-8.0-valgrind
+    ps_version: 8.0-valgrind
+    branch_name: release-8.0.42-33
+    mtr_opts: --unit-tests-report --mysqld=--innodb_use_native_aio=0 --suite-timeout=600000 --retry-failure=0
+    scripts_repo: https://github.com/Percona-Lab/ps-build
+    scripts_branch: '8.0'
+    docker_os_list:
+      - ubuntu:noble
+      - debian:bookworm
+    sanitizer_opts_list:
+      - -DWITH_VALGRIND=ON
+      - -DWITH_ASAN=ON -DWITH_ASAN_SCOPE=ON
+      - -DWITH_ASAN=ON
+      - -DWITH_ASAN=ON -DWITH_ASAN_SCOPE=ON -DWITH_UBSAN=ON
+      - -DWITH_ASAN=ON -DWITH_UBSAN=ON
+      - -DWITH_UBSAN=ON
+      - -DWITH_MSAN=ON
     jobs:
       - percona-server-{ps_version}-pipeline-parallel-mtr
