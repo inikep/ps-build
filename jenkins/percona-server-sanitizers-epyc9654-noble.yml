@@ -216,8 +216,9 @@
           keep-long-stdio: true
           health-scale-factor: 1.0
           allow-empty-results: false
+          keep-long-stdio: false
       - archive:
-          artifacts: "*.tar.gz, *.log*, *.txt, *.xml"
+          artifacts: "*.tar.gz, *.log*, *.txt"
           allow_empty_archive: false
           only_if_successful: false
           fingerprint: false
@@ -231,7 +232,7 @@
     name: ASAN-8.0
     sanitizer: ASAN
     ps_version: 8.0
-    branch_name: release-8.0.42-33
+    branch_name: release-8.0.43-34
     sanitizer_opts: '-DWITH_ASAN=ON -DWITH_ASAN_SCOPE=ON'
     mtr_opts: --unit-tests-report --big-test --mysqld=--innodb_use_native_aio=0 --parallel=96
     scripts_repo: Percona-Lab/ps-build
@@ -243,9 +244,9 @@
     name: VALGRIND-8.0
     sanitizer: VALGRIND
     ps_version: 8.0
-    branch_name: release-8.0.42-33
+    branch_name: release-8.0.43-34
     sanitizer_opts: '-DWITH_VALGRIND=ON'
-    mtr_opts: --mysqld=--innodb_use_native_aio=0 --suite-timeout=600000 --retry-failure=0 --parallel=64
+    mtr_opts: --unit-tests-report --big-test --mysqld=--innodb_use_native_aio=0 --suite-timeout=600000 --retry-failure=0 --parallel=64
     scripts_repo: Percona-Lab/ps-build
     scripts_branch: 8.0
     jobs:
@@ -256,7 +257,7 @@
     name: ASAN-8.4
     sanitizer: ASAN
     ps_version: 8.4
-    branch_name: release-8.4.5-5
+    branch_name: release-8.4.6-6
     sanitizer_opts: '-DWITH_ASAN=ON -DWITH_ASAN_SCOPE=ON'
     mtr_opts: --unit-tests-report --big-test --mysqld=--innodb_use_native_aio=0 --parallel=96
     scripts_repo: Percona-Lab/ps-build
@@ -268,9 +269,9 @@
     name: VALGRIND-8.4
     sanitizer: VALGRIND
     ps_version: 8.4
-    branch_name: release-8.4.5-5
+    branch_name: release-8.4.6-6
     sanitizer_opts: '-DWITH_VALGRIND=ON'
-    mtr_opts: --mysqld=--innodb_use_native_aio=0 --suite-timeout=600000 --retry-failure=0 --parallel=64
+    mtr_opts: --unit-tests-report --big-test --mysqld=--innodb_use_native_aio=0 --suite-timeout=600000 --retry-failure=0 --parallel=64
     scripts_repo: Percona-Lab/ps-build
     scripts_branch: 8.0
     jobs:
@@ -281,7 +282,7 @@
     name: ASAN-9.x
     sanitizer: ASAN
     ps_version: 9.x
-    branch_name: release-9.2.0-1
+    branch_name: release-9.4.0-1
     sanitizer_opts: '-DWITH_ASAN=ON -DWITH_ASAN_SCOPE=ON'
     mtr_opts: --unit-tests-report --big-test --mysqld=--innodb_use_native_aio=0 --parallel=96
     scripts_repo: Percona-Lab/ps-build
@@ -293,9 +294,9 @@
     name: VALGRIND-9.x
     sanitizer: VALGRIND
     ps_version: 9.x
-    branch_name: release-9.2.0-1
+    branch_name: release-9.4.0-1
     sanitizer_opts: '-DWITH_VALGRIND=ON'
-    mtr_opts: --mysqld=--innodb_use_native_aio=0 --suite-timeout=600000 --retry-failure=0 --parallel=64
+    mtr_opts: --unit-tests-report --big-test --mysqld=--innodb_use_native_aio=0 --suite-timeout=600000 --retry-failure=0 --parallel=64
     scripts_repo: Percona-Lab/ps-build
     scripts_branch: 8.0
     jobs:
