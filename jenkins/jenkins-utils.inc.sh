@@ -65,12 +65,18 @@ function build_and_run_sanitizer() {
     filter_valgrind_log mtr-test.full-log mtr-test.log
     zstd -c mtr-test.log > mtr-test.log.zst
 
-    grep -A16 "Conditional jump or move depends on uninitialised" mtr-test.log >mtr-test-valgrind-ConditionalJump.log || :
-    grep -A16 "are definitely lost"         mtr-test.log >mtr-test-valgrind-definitelyLost.log || :
-    grep -B128 -A128 "Invalid read of size" mtr-test.log >mtr-test-valgrind-InvalidRead.log || :
-    grep -A16 "ERROR: .*Sanitizer"          mtr-test.log >mtr-test-Errors-Sanitizers.log || :
-    grep -A16 "ERROR: AddressSanitizer"     mtr-test.log >mtr-test-Errors-AddressSanitizer.log || :
-    grep -A16 "ERROR: LeakSanitizer"        mtr-test.log >mtr-test-Errors-LeakSanitizer.log || :
+    if [[ "$ANALYZER_OPTS" == *"-DWITH_VALGRIND=ON"* ]]; then
+        grep -A16 "Conditional jump or move depends on uninitialised" mtr-test.log >mtr-test-valgrind-ConditionalJump.log || :
+        grep -A16 "are definitely lost"          mtr-test.log >mtr-test-valgrind-definitelyLost.log || :
+        grep -B128 -A128 "Invalid read of size"  mtr-test.log >mtr-test-valgrind-InvalidRead.log || :
+        grep -B128 -A128 "Invalid write of size" mtr-test.log >mtr-test-valgrind-InvalidWrite.log || :
+    fi
+
+    if [[ "$ANALYZER_OPTS" == *"-DWITH_ASAN=ON"* ]]; then
+        grep -A16 "ERROR: .*Sanitizer"          mtr-test.log >mtr-test-Errors-Sanitizers.log || :
+        grep -A16 "ERROR: AddressSanitizer"     mtr-test.log >mtr-test-Errors-AddressSanitizer.log || :
+        grep -A16 "ERROR: LeakSanitizer"        mtr-test.log >mtr-test-Errors-LeakSanitizer.log || :
+    fi
 
     ls -l
     cp $WORK_DIR/*.log* $WORKSPACE/
