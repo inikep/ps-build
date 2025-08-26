@@ -232,8 +232,13 @@ void doTestWorkerJobWithoutGuard(Integer WORKER_ID, String SUITES, String STANDA
 
             // This is questionable. Do we need result XMLs in S3 cache while Jenkins archives them as well?
             syncDirToS3("./${WORK_DIR}/results/", "${BUILD_TAG_BINARIES}", 'mtr_var/*')
-            step([$class: 'JUnitResultArchiver', testResults: "${WORK_DIR}/results/*.xml", healthScaleFactor: 1.0])
-            archiveArtifacts "${WORK_DIR}/results/*.xml,${WORK_DIR}/results/ps80-test-mtr_logs-*.tar.gz"
+            step([
+                $class: 'JUnitResultArchiver',
+                testResults: "${WORK_DIR}/results/*.xml",
+                healthScaleFactor: 1.0,
+                keepLongStdio: false
+            ])
+            archiveArtifacts "${WORK_DIR}/*.log*,${WORK_DIR}/results/*.xml,${WORK_DIR}/results/ps80-test-mtr_logs-*.tar.gz"
 
             // cleanup before marking success
             cleanWorkspace(WORKER_ID)
@@ -621,6 +626,9 @@ def notifySlack(status, color, customMessage) {
 
 if (params.CLOUD == 'Hetzner') {
     LABEL = 'docker-x64'
+    MICRO_LABEL = 'launcher-x64'
+} else if (params.CLOUD == 'epyc9654') {
+    LABEL = 'as-1015cs-tnr'
     MICRO_LABEL = 'launcher-x64'
 } else {
     // by default fallback to AWS
