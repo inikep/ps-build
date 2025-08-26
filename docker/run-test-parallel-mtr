@@ -115,4 +115,28 @@ docker run --rm --shm-size=32G \
     bash -x /tmp/scripts/test-binary-parallel-mtr /tmp/work/
 
     sudo chown -R $(id -u):$(id -g) /tmp/work/results
-" 2>&1 | tee ${WORK_DIR}/mtr_test.log
+" 2>&1 | tee ${WORK_DIR}/mtr-test_${WORKER_NO}.log
+
+cd $WORK_DIR
+whoami
+ls -l
+
+if [[ "$ANALYZER_OPTS" == *"-DWITH_VALGRIND=ON"* ]]; then
+    mv mtr-test_${WORKER_NO}.log mtr-test_${WORKER_NO}_full.log
+    zstd -c mtr-test_${WORKER_NO}_full.log > mtr-test_${WORKER_NO}_full.log.zst
+
+    source ${SCRIPTS_DIR}/utils.inc.sh
+    filter_valgrind_log mtr-test_${WORKER_NO}_full.log mtr-test_${WORKER_NO}.log
+    rm -rf mtr-test_${WORKER_NO}_full.log
+
+    grep -A16 "Conditional jump or move depends on uninitialised" mtr-test_${WORKER_NO}.log >mtr-test_${WORKER_NO}-valgrind-ConditionalJump.log || :
+    grep -A16 "are definitely lost"          mtr-test_${WORKER_NO}.log >mtr-test_${WORKER_NO}-valgrind-definitelyLost.log || :
+    grep -B128 -A128 "Invalid read of size"  mtr-test_${WORKER_NO}.log >mtr-test_${WORKER_NO}-valgrind-InvalidRead.log || :
+    grep -B128 -A128 "Invalid write of size" mtr-test_${WORKER_NO}.log >mtr-test_${WORKER_NO}-valgrind-InvalidWrite.log || :
+fi
+
+if [[ "$ANALYZER_OPTS" == *"-DWITH_ASAN=ON"* ]]; then
+    grep -A16 "ERROR: .*Sanitizer"          mtr-test_${WORKER_NO}.log >mtr-test_${WORKER_NO}-Errors-Sanitizers.log || :
+    grep -A16 "ERROR: AddressSanitizer"     mtr-test_${WORKER_NO}.log >mtr-test_${WORKER_NO}-Errors-AddressSanitizer.log || :
+    grep -A16 "ERROR: LeakSanitizer"        mtr-test_${WORKER_NO}.log >mtr-test_${WORKER_NO}-Errors-LeakSanitizer.log || :
+fi

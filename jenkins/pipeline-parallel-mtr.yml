@@ -126,6 +126,7 @@
         choices:
         - "Hetzner"
         - "AWS"
+        - "epyc9654"
         description: "Host provider for Jenkins workers"
     - choice:
         name: FULL_MTR
@@ -259,11 +260,12 @@
     jobs:
       - percona-server-{ps_version}-pipeline-parallel-mtr
 
+
 - project:
-    name: pipeline-parallel-mtr-8.0-valgrind
-    ps_version: 8.0-valgrind
-    branch_name: release-8.0.42-33
-    mtr_opts: --unit-tests-report --mysqld=--innodb_use_native_aio=0 --suite-timeout=600000 --retry-failure=0
+    name: pipeline-parallel-mtr-VALGRIND
+    ps_version: VALGRIND
+    branch_name: release-9.4.0-1
+    mtr_opts: --unit-tests-report --big-test --mysqld=--innodb_use_native_aio=0 --suite-timeout=600000 --retry-failure=0
     scripts_repo: https://github.com/Percona-Lab/ps-build
     scripts_branch: '8.0'
     docker_os_list:
