@@ -13,8 +13,9 @@ function filter_valgrind_log() {
   }
 
   /==[0-9]+== .*in loss record [0-9,]+ of [0-9,]+/ {
-      match($0, /==([0-9]+)== .*in loss record ([0-9,]+) of [0-9,]+/, m)
-      record_num = strip_commas(m[2])  # cleans and converts
+      # Extract the record number
+      n = split($0, parts, /in loss record | of /)
+      record_num = strip_commas(parts[2])
       if (record_num > 16) {
           skipping = 1
       } else {
