@@ -158,6 +158,10 @@
       - shell:
           command: |
             #!/bin/bash
+
+            set -o errexit
+            set -o xtrace
+
             uname -a
             df -h
             echo WORKSPACE=$WORKSPACE
