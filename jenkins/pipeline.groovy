@@ -1,154 +1,17 @@
-if (params.MTR_ARGS.contains('--big-test')) {
+AWS_CREDENTIALS_ID = '10ee734d-bbd1-4b4b-a611-5a2765ef9d47'
+
+if (params.CLOUD == 'Hetzner') {
+    LABEL = 'docker-x64'
+    MICRO_LABEL = 'launcher-x64'
+} else {
+    // by default fallback to AWS
     LABEL = 'docker-32gb'
+    MICRO_LABEL = 'micro-amazon'
 }
 
 pipeline {
-    parameters {
-        string(
-            defaultValue: 'https://github.com/percona/percona-server',
-            description: 'URL to percona-server repository',
-            name: 'GIT_REPO',
-            trim: true)
-        string(
-            defaultValue: '5.7',
-            description: 'Tag/Branch for percona-server repository',
-            name: 'BRANCH',
-            trim: true)
-        string(
-            defaultValue: '',
-            description: 'URL to forked PerconaFT repository',
-            name: 'PERCONAFT_REPO',
-            trim: true)
-        string(
-            defaultValue: '',
-            description: 'Tag/Branch for PerconaFT repository',
-            name: 'PERCONAFT_BRANCH',
-            trim: true)
-        string(
-            defaultValue: '',
-            description: 'URL to forked Percona-TokuBackup repository',
-            name: 'TOKUBACKUP_REPO',
-            trim: true)
-        string(
-            defaultValue: '',
-            description: 'Tag/Branch for Percona-TokuBackup repository',
-            name: 'TOKUBACKUP_BRANCH',
-            trim: true)
-        choice(
-            choices: 'centos:7\ncentos:8\noraclelinux:9\nubuntu:bionic\nubuntu:focal\nubuntu:jammy\nubuntu:noble\ndebian:buster\ndebian:bullseye\ndebian:bookworm\namazonlinux:2',
-            description: 'OS version for compilation',
-            name: 'DOCKER_OS')
-        choice(
-            choices: '/usr/bin/cmake',
-            description: 'path to cmake binary',
-            name: 'JOB_CMAKE')
-        choice(
-            choices: 'default',
-            description: 'compiler version',
-            name: 'COMPILER')
-        choice(
-            choices: 'RelWithDebInfo\nDebug',
-            description: 'Type of build to produce',
-            name: 'CMAKE_BUILD_TYPE')
-        choice(
-            choices: '\n-DWITH_ASAN=ON -DWITH_ASAN_SCOPE=ON\n-DWITH_ASAN=ON\n-DWITH_ASAN=ON -DWITH_ASAN_SCOPE=ON -DWITH_UBSAN=ON\n-DWITH_ASAN=ON -DWITH_UBSAN=ON\n-DWITH_UBSAN=ON\n-DWITH_MSAN=ON\n-DWITH_VALGRIND=ON',
-            description: 'Enable code checking',
-            name: 'ANALYZER_OPTS')
-        choice(
-            choices: 'ON\nOFF',
-            description: 'Compile TokuDB engine',
-            name: 'WITH_TOKUDB')
-        choice(
-            choices: 'ON\nOFF',
-            description: 'Compile RocksDB engine',
-            name: 'WITH_ROCKSDB')
-        choice(
-            choices: 'ON\nOFF',
-            description: 'Whether to build embedded server',
-            name: 'WITH_EMBEDDED_SERVER')
-        choice(
-            choices: 'ON\nOFF',
-            description: 'Whether to build rapid development cycle plugins',
-            name: 'WITH_RAPID')
-        choice(
-            choices: 'system\nbundled',
-            description: 'Type of SSL support',
-            name: 'WITH_SSL')
-        choice(
-            choices: 'ON\nOFF',
-            description: 'Whether to build with support for keyring_vault Plugin',
-            name: 'WITH_KEYRING_VAULT')
-        choice(
-            choices: '\n-DWITHOUT_PERFSCHEMA_STORAGE_ENGINE=ON',
-            description: 'Disable Performance Schema',
-            name: 'PERFSCHEMA_OPTS')
-        string(
-            defaultValue: '',
-            description: 'cmake options',
-            name: 'CMAKE_OPTS')
-        string(
-            defaultValue: '',
-            description: 'make options, like VERBOSE=1',
-            name: 'MAKE_OPTS')
-
-        choice(
-            choices: 'yes\nno',
-            description: 'Run mysql-test-run.pl',
-            name: 'DEFAULT_TESTING')
-        choice(
-            choices: 'yes\nno',
-            description: 'Run mysql-test-run.pl --suite tokudb.backup',
-            name: 'HOTBACKUP_TESTING')
-        choice(
-            choices: 'yes\nno',
-            description: 'Run mtr --suite=engines/iuds,engines/funcs --mysqld=--default-storage-engine=tokudb',
-            name: 'TOKUDB_ENGINES_MTR')
-        string(
-            defaultValue: '--unit-tests-report',
-            description: 'TokuDB specific mtr args',
-            name: 'TOKUDB_ENGINES_MTR_ARGS')
-        choice(
-            choices: 'yes\nno',
-            description: 'Run mtr --suite=engines/iuds,engines/funcs --mysqld=--default-storage-engine=rocksdb',
-            name: 'ROCKSDB_ENGINES_MTR')
-        string(
-            defaultValue: '--unit-tests-report',
-            description: 'RocksDB specific mtr args',
-            name: 'ROCKSDB_ENGINES_MTR_ARGS')
-
-        string(
-            defaultValue: '--unit-tests-report --big-test',
-            description: 'mysql-test-run.pl options, for options like: --big-test --nounit-tests --unit-tests-report',
-            name: 'MTR_ARGS')
-        string(
-            defaultValue: '1',
-            description: 'Run each test N number of times, --repeat=N',
-            name: 'MTR_REPEAT')
-        choice(
-            choices: 'yes\nno',
-            description: 'Run mtr --suite=keyring_vault',
-            name: 'KEYRING_VAULT_MTR')
-        string(
-            defaultValue: '0.9.6',
-            description: 'Specifies version of Hashicorp Vault for V1 tests',
-            name: 'KEYRING_VAULT_V1_VERSION'
-        )
-        string(
-            defaultValue: '1.9.0',
-            description: 'Specifies version of Hashicorp Vault for V2 tests',
-            name: 'KEYRING_VAULT_V2_VERSION'
-        )
-        choice(
-            choices: 'yes\nno',
-            description: 'Run case-insensetive MTR tests',
-            name: 'CI_FS_MTR')
-        choice(
-            choices: 'docker\ndocker-32gb',
-            description: 'Run build on specified instance type',
-            name: 'LABEL')
-    }
     agent {
-        label 'micro-amazon'
+        label MICRO_LABEL
     }
     options {
         skipDefaultCheckout()
@@ -163,11 +26,11 @@ pipeline {
                 script {
                     currentBuild.displayName = "${BUILD_NUMBER} ${CMAKE_BUILD_TYPE}/${DOCKER_OS}"
                 }
-                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', accessKeyVariable: 'AWS_ACCESS_KEY_ID', credentialsId: '10ee734d-bbd1-4b4b-a611-5a2765ef9d47', secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']]) {
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', accessKeyVariable: 'AWS_ACCESS_KEY_ID', credentialsId: AWS_CREDENTIALS_ID, secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']]) {
                   withCredentials([string(credentialsId: 'JNKPercona', variable: 'JNKPercona_token')]) {
                     sh 'echo Prepare: \$(date -u "+%s")'
                     echo 'Checking Percona Server branch version, JEN-913 prevent wrong version run'
-                    sh '''
+                    sh '''#!/bin/bash -x
                         MY_BRANCH_BASE_MAJOR=5
                         MY_BRANCH_BASE_MINOR=7
                         GIT_REPO_LINK=${GIT_REPO}
@@ -191,7 +54,7 @@ pipeline {
                         rm -f ${WORKSPACE}/VERSION-${BUILD_NUMBER}
                     '''
                     git branch: '5.7', url: 'https://github.com/Percona-Lab/ps-build'
-                    sh '''
+                    sh '''#!/bin/bash -x
                         git reset --hard
                         git clean -xdf
                         sudo rm -rf sources
@@ -235,13 +98,15 @@ pipeline {
         }
         stage('Archive Build') {
             options { retry(3) }
-            agent { label 'micro-amazon' }
+            agent { label MICRO_LABEL }
             steps {
                 deleteDir()
-                sh '''
-                    aws s3 cp --no-progress s3://ps-build-cache/${BUILD_TAG}/build.log.gz ./build.log.gz
-                    gunzip build.log.gz
-                '''
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', accessKeyVariable: 'AWS_ACCESS_KEY_ID', credentialsId: AWS_CREDENTIALS_ID, secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']]) {
+                    sh '''
+                        aws s3 cp --no-progress s3://ps-build-cache/${BUILD_TAG}/build.log.gz ./build.log.gz
+                        gunzip build.log.gz
+                    '''
+                }
                 recordIssues enabledForFailure: true, tools: [gcc(pattern: 'build.log')]
             }
         }
@@ -250,12 +115,12 @@ pipeline {
             agent { label LABEL }
             steps {
                 git branch: '5.7', url: 'https://github.com/Percona-Lab/ps-build'
-                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', accessKeyVariable: 'AWS_ACCESS_KEY_ID', credentialsId: '10ee734d-bbd1-4b4b-a611-5a2765ef9d47', secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']]) {
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', accessKeyVariable: 'AWS_ACCESS_KEY_ID', credentialsId: AWS_CREDENTIALS_ID, secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']]) {
                     withCredentials([
                         string(credentialsId: 'MTR_VAULT_TOKEN', variable: 'MTR_VAULT_TOKEN'),
                         string(credentialsId: 'VAULT_V1_DEV_TOKEN', variable: 'VAULT_V1_DEV_TOKEN'),
                         string(credentialsId: 'VAULT_V2_DEV_TOKEN', variable: 'VAULT_V2_DEV_TOKEN')]) {
-                            sh '''
+                            sh '''#!/bin/bash -x
                                 git reset --hard
                                 git clean -xdf
                                 ls -la ./ || true
@@ -267,7 +132,11 @@ pipeline {
                                     mkdir -p sources/results
                                 done
 
-                                sudo yum -y install jq
+                                if [ -f /usr/bin/yum ]; then
+                                    sudo yum -y install jq
+                                else
+                                    sudo apt-get install -y jq
+                                fi
 
                                 if [[ \$CI_FS_MTR == 'yes' ]]; then
                                     if [[ ! -f /mnt/ci_disk_\$CMAKE_BUILD_TYPE.img ]] && [[ -z \$(mount | grep /mnt/ci_disk_dir_\$CMAKE_BUILD_TYPE) ]]; then
@@ -300,17 +169,19 @@ pipeline {
         }
         stage('Archive') {
             options { retry(3) }
-            agent { label 'micro-amazon' }
+            agent { label MICRO_LABEL }
             steps {
                 deleteDir()
-                sh '''
-                    aws s3 sync --no-progress --exclude 'binary.tar.gz' s3://ps-build-cache/${BUILD_TAG}/ ./
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', accessKeyVariable: 'AWS_ACCESS_KEY_ID', credentialsId: AWS_CREDENTIALS_ID, secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']]) {
+                    sh '''
+                        aws s3 sync --no-progress --exclude 'binary.tar.gz' s3://ps-build-cache/${BUILD_TAG}/ ./
 
-                    echo "
-                        binary    - https://s3.us-east-2.amazonaws.com/ps-build-cache/${BUILD_TAG}/binary.tar.gz
-                        build log - https://s3.us-east-2.amazonaws.com/ps-build-cache/${BUILD_TAG}/build.log.gz
-                    " > public_url
-                '''
+                        echo "
+                            binary    - https://s3.us-east-2.amazonaws.com/ps-build-cache/${BUILD_TAG}/binary.tar.gz
+                            build log - https://s3.us-east-2.amazonaws.com/ps-build-cache/${BUILD_TAG}/build.log.gz
+                        " > public_url
+                    '''
+                }
                 script {
                     if (!(params.GIT_REPO =~ 'post-eol')) {
                         step([$class: 'JUnitResultArchiver', testResults: '**/*.xml', healthScaleFactor: 1.0])

@@ -172,11 +172,11 @@
         - "no"
         description: Run case-insensetive MTR tests
     - choice:
-        name: LABEL
+        name: CLOUD
         choices:
-        - docker
-        - docker-32gb
-        description: Run build on specified instance type
+        - "Hetzner"
+        - "AWS"
+        description: "Host provider for Jenkins workers"
     axes:
       - axis:
          type: user-defined
