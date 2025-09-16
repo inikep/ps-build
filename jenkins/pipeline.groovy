@@ -143,7 +143,7 @@ pipeline {
                                         sudo dd if=/dev/zero of=/mnt/ci_disk_\$CMAKE_BUILD_TYPE.img bs=1G count=10
                                         sudo /sbin/mkfs.vfat /mnt/ci_disk_\$CMAKE_BUILD_TYPE.img
                                         sudo mkdir -p /mnt/ci_disk_dir_\$CMAKE_BUILD_TYPE
-                                        sudo mount -o loop -o uid=27 -o gid=27 -o check=r /mnt/ci_disk_\$CMAKE_BUILD_TYPE.img /mnt/ci_disk_dir_\$CMAKE_BUILD_TYPE
+                                        sudo mount -o loop -o uid=1001 -o gid=1001 -o check=r /mnt/ci_disk_\$CMAKE_BUILD_TYPE.img /mnt/ci_disk_dir_\$CMAKE_BUILD_TYPE
                                     fi                                
                                 fi
 
@@ -152,7 +152,7 @@ pipeline {
                                 sg docker -c "
                                     if [ \$(docker ps -a -q | wc -l) -ne 0 ]; then
                                         docker ps -a -q | xargs docker stop --time 1 || :
-                                        docker rm --force consul vault-prod-v{1..2} vault-dev-v{1..2} || :
+                                        docker rm --force consul vault-prod-v1 vault-prod-v2 vault-dev-v1 vault-dev-v2 || :
                                     fi
                                     ulimit -a
                                     ./docker/run-test ${DOCKER_OS}
