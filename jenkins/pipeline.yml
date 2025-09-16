@@ -197,3 +197,10 @@
         - "Hetzner"
         - "AWS"
         description: "Host provider for Jenkins workers"
+    - string:
+        name: JENKINS_SCRIPTS_REPO
+        default: 'https://github.com/Percona-Lab/ps-build'
+        description: Download the build scripts from this repository, except for the Groovy script referenced by the path defined in pipeline.yml
+    - string:
+        name: JENKINS_SCRIPTS_BRANCH
+        default: '5.7'

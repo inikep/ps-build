@@ -53,7 +53,7 @@ pipeline {
                         fi
                         rm -f ${WORKSPACE}/VERSION-${BUILD_NUMBER}
                     '''
-                    git branch: '5.7', url: 'https://github.com/Percona-Lab/ps-build'
+                    git branch: JENKINS_SCRIPTS_BRANCH, url: JENKINS_SCRIPTS_REPO
                     sh '''#!/bin/bash -x
                         git reset --hard
                         git clean -xdf
@@ -114,7 +114,7 @@ pipeline {
             options { retry(3) }
             agent { label LABEL }
             steps {
-                git branch: '5.7', url: 'https://github.com/Percona-Lab/ps-build'
+                git branch: JENKINS_SCRIPTS_BRANCH, url: JENKINS_SCRIPTS_REPO
                 withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', accessKeyVariable: 'AWS_ACCESS_KEY_ID', credentialsId: AWS_CREDENTIALS_ID, secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']]) {
                     withCredentials([
                         string(credentialsId: 'MTR_VAULT_TOKEN', variable: 'MTR_VAULT_TOKEN'),
