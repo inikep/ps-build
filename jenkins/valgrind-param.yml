@@ -63,8 +63,8 @@
     - choice:
         name: WITH_TOKUDB
         choices:
-        - "OFF"
         - "ON"
+        - "OFF"
         description: Compile TokuDB engine
     - choice:
         name: WITH_ROCKSDB
