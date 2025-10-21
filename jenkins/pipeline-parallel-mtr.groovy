@@ -727,7 +727,6 @@ pipeline {
                         VAULT_V2_DEV_ROOT_TOKEN = 'VAULT_V2_DEV_TOKEN'
                     }
                 }
-                git branch: JENKINS_SCRIPTS_BRANCH, url: JENKINS_SCRIPTS_REPO
 
                 script {
                     BUILD_TRIGGER_BY = " (${currentBuild.getBuildCauses()[0].userId})"
@@ -741,10 +740,6 @@ pipeline {
                 sh 'echo Prepare: \$(date -u "+%s")'
 
                 script {
-                    SERVER_VERSION = getServerVersion()
-                    echo "Extracted SERVER_VERSION: ${SERVER_VERSION}"
-                    setupTestSuitesSplit()
-
                     env.BUILD_TAG_BINARIES = "jenkins-${env.JOB_NAME}-${env.BUILD_NUMBER_BINARIES}"
                     BUILD_NUMBER_BINARIES_FOR_RERUN = env.BUILD_NUMBER_BINARIES
                     sh 'printenv'
@@ -763,6 +758,12 @@ pipeline {
                             echo "JENKINS_SCRIPTS_REPO: $JENKINS_SCRIPTS_REPO"
                         }
                         git branch: JENKINS_SCRIPTS_BRANCH, url: JENKINS_SCRIPTS_REPO
+
+                        script {
+                            SERVER_VERSION = getServerVersion()
+                            echo "Extracted SERVER_VERSION: ${SERVER_VERSION}"
+                            setupTestSuitesSplit()
+                        }
 
                         checkoutSources()
 
