@@ -365,7 +365,6 @@ def getServerVersionFromFile(String filePath) {
 def getServerVersion() {
     echo 'Trying to get the server version'
 
-    withCredentials([string(credentialsId: 'JNKPercona', variable: 'JNKPercona_token')]) {
         sh '''#!/bin/bash
             set -xe
 
@@ -385,25 +384,17 @@ def getServerVersion() {
                 BRANCH=$(curl -s https://api.github.com/repos/percona/percona-server/pulls/$BRANCH | jq -r '.head.ref')
             fi
 
-            GIT_REPO_LINK=${GIT_REPO}
-            if [[ "${GIT_REPO}" =~ (post-eol|private|eol-dev) ]]; then
-                GIT_REPO_LINK=$(echo ${GIT_REPO} | sed -e "s|github|x-access-token:${JNKPercona_token}@github|g")
-            fi
-            RAW_VERSION_LINK=$(echo ${GIT_REPO_LINK%.git} | sed -e "s:github.com:raw.githubusercontent.com:g")
-            REPLY=$(curl -Is ${RAW_VERSION_LINK}/${BRANCH}/MYSQL_VERSION | head -n 1 | awk '{print $2}')
-            if [[ ${REPLY} != 200 ]]; then
-                curl ${RAW_VERSION_LINK}/${BRANCH}/VERSION -o ${WORKSPACE}/VERSION-${BUILD_NUMBER}
+            if [[ -f sources/MYSQL_VERSION ]]; then
+                cp sources/MYSQL_VERSION "${WORKSPACE}/VERSION-${BUILD_NUMBER}"
             else
-                curl ${RAW_VERSION_LINK}/${BRANCH}/MYSQL_VERSION -o ${WORKSPACE}/VERSION-${BUILD_NUMBER}
+                cp sources/VERSION "${WORKSPACE}/VERSION-${BUILD_NUMBER}"
             fi
          '''
-    } // withCredentials
 
     return getServerVersionFromFile("${WORKSPACE}/VERSION-${BUILD_NUMBER}")
 }
 
 void setupTestSuitesSplit() {
-    withCredentials([string(credentialsId: 'JNKPercona', variable: 'JNKPercona_token')]) {
     withEnv(["SERVER_VERSION=${SERVER_VERSION}"]) {
     sh '''#!/bin/bash
         set -xe
@@ -464,7 +455,6 @@ void setupTestSuitesSplit() {
         fi
     '''
     } // withEnv
-    } // withCredentials
 
     script {
         if (env.FULL_MTR == 'yes') {
@@ -759,13 +749,13 @@ pipeline {
                         }
                         git branch: JENKINS_SCRIPTS_BRANCH, url: JENKINS_SCRIPTS_REPO
 
+                        checkoutSources()
+
                         script {
                             SERVER_VERSION = getServerVersion()
                             echo "Extracted SERVER_VERSION: ${SERVER_VERSION}"
                             setupTestSuitesSplit()
                         }
-
-                        checkoutSources()
 
                         script {
                             // Set ccache size as environment variable
