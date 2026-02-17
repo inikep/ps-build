@@ -640,6 +640,7 @@ if [[ "${KEEP_BUILD}" != "yes" ]]; then
     rm -rf ${EXTRACT_DIR}
 fi
 
+cd ${WORKDIR}
 tar -C ${RESULTS_DIR} --owner=0 --group=0 -czf "${RESULTS_DIR}/ps80-test-mtr_logs-${WORKER_NO}.tar.gz" mtr_var
 
 ls -l ${WORKDIR}
