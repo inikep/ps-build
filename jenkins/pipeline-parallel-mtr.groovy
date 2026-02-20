@@ -1003,22 +1003,22 @@ pipeline {
     post {
         success {
             script {
-                notifySlack(currentBuild.currentResult, '#36a64f', '[{jobName}]: is {status}! :rocket: Started by {userId} ({email} / <@{slackUserId}>).')
+                notifySlack(currentBuild.currentResult, '#36a64f', "[{jobName}]: is {status}! :rocket:\nStarted by {userId} ({email} / <@{slackUserId}>).\n${DOCKER_OS} ${ARCH} ${CMAKE_BUILD_TYPE}")
             }
         }
         failure {
             script {
-                notifySlack(currentBuild.currentResult, '#36a64f', '[{jobName}]: has {status}! :face_with_peeking_eye: Started by {userId} ({email} / <@{slackUserId}>).')
+                notifySlack(currentBuild.currentResult, '#36a64f', "[{jobName}]: has {status}! :face_with_peeking_eye:\nStarted by {userId} ({email} / <@{slackUserId}>).\n${DOCKER_OS} ${ARCH} ${CMAKE_BUILD_TYPE}")
             }
         }
         aborted {
             script {
-                notifySlack(currentBuild.currentResult, '#36a64f', '[{jobName}]: has {status}! :axe: Started by {userId} ({email} / <@{slackUserId}>).')
+                notifySlack(currentBuild.currentResult, '#36a64f', "[{jobName}]: has {status}! :axe:\nStarted by {userId} ({email} / <@{slackUserId}>).\n${DOCKER_OS} ${ARCH} ${CMAKE_BUILD_TYPE}")
             }
         }
         unstable {
             script {
-                notifySlack(currentBuild.currentResult, '#36a64f', '[{jobName}]: is {status}! :warning: Started by {userId} ({email} / <@{slackUserId}>).')
+                notifySlack(currentBuild.currentResult, '#36a64f', "[{jobName}]: is {status}! :warning:\nStarted by {userId} ({email} / <@{slackUserId}>).\n${DOCKER_OS} ${ARCH} ${CMAKE_BUILD_TYPE}")
             }
         }
         always {
