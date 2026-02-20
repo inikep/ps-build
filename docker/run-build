@@ -74,11 +74,16 @@ docker run --rm \
     export DOCKER_OS='${SOURCE_IMAGE}'
     export KEEP_BUILD='${KEEP_BUILD}'
 
-    sudo chown mysql:mysql /tmp/work /tmp/sources /tmp/sources/mysql-test/collections /tmp/sources/storage/rocksdb/rocksdb/util /tmp/sources/rocksdb/util /tmp/ccache || :
+    MYROCKS_DIR=/tmp/sources/storage/rocksdb/rocksdb/util
+    if [ ! -d "\$MYROCKS_DIR" ]; then
+        MYROCKS_DIR=/tmp/sources/rocksdb/util
+        if [ ! -d "\$MYROCKS_DIR" ]; then MYROCKS_DIR=; fi
+    fi
+    sudo chown mysql:mysql /tmp/work /tmp/sources /tmp/sources/mysql-test/collections \$MYROCKS_DIR /tmp/ccache || :
     cp -r /tmp/source_downloads /tmp/work/source_downloads
 
     bash -x /tmp/scripts/build-binary /tmp/work /tmp/sources
 
     rm -rf /tmp/work/source_downloads
-    sudo chown $(id -u):$(id -g) /tmp/work /tmp/sources /tmp/sources/mysql-test/collections /tmp/sources/storage/rocksdb/rocksdb/util /tmp/sources/rocksdb/util /tmp/ccache || :
+    sudo chown $(id -u):$(id -g) /tmp/work /tmp/sources /tmp/sources/mysql-test/collections \$MYROCKS_DIR /tmp/ccache || :
 "
