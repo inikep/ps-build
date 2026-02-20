@@ -1023,7 +1023,7 @@ pipeline {
         }
         always {
             triggerAbortedTestWorkersRerun()
-            sh 'echo Finish: \$(date -u "+%s")'
+            echo "Finish: ${(long)(System.currentTimeMillis() / 1000)}"
         }
     }
 }
