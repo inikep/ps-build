@@ -158,7 +158,7 @@ sudo dmesg -T 2>/dev/null | tail -20 || sudo dmesg 2>/dev/null | tail -20 || ech
 print_diagnostics "startup"
 echo "*******************************************************"
 
-if [[ "${SERVER_VERSION}" == 8.0.* ]]; then
+if [[ "${SERVER_VERSION}" == 8.0.* || "${SERVER_VERSION}" == 5.7.* ]]; then
     MTR_ARGS_KV_SUITE="--suite=keyring_vault"
 else
     MTR_ARGS_KV_SUITE="--suite=component_keyring_vault"
