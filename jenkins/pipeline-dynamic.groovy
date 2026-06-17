@@ -56,6 +56,7 @@ ALL_SUITES     = []   // full ordered suite list (set once)
 NEXT_INDEX     = 0    // cursor: index of the next suite to hand out
 FAILED_SUITES  = []   // suites/specials to rerun
 RUNNING_SUITES = [:]  // suite -> "worker-N"
+SUITE_RESULTS  = []   // per-suite timing for the end-of-run summary: [suite,worker,seq,secs,status]
 
 // Heavy suites are split into separate "|nobig" and "|big" queue items so the two halves
 // can run on different workers (a bare suite would run both back-to-back on one worker).
@@ -113,6 +114,46 @@ void sweepRunningToFailed(String owner) {
     def stuck = RUNNING_SUITES.findAll { k, v -> v == owner }.collect { k, v -> k }
     FAILED_SUITES  = FAILED_SUITES + stuck
     RUNNING_SUITES = RUNNING_SUITES.findAll { k, v -> v != owner }
+}
+
+// Record one suite's wall-clock result for the end-of-run summary (reassignment, no mutators).
+@NonCPS
+void recordSuiteResult(String suite, int worker, int seq, long secs, String status) {
+    SUITE_RESULTS = SUITE_RESULTS + [[suite: suite, worker: worker, seq: seq, secs: secs, status: status]]
+}
+
+// Right-pad a string to width n using only whitelisted String ops (no String.format).
+@NonCPS
+String pad(String s, int n) {
+    def out = s
+    while (out.length() < n) {
+        out = out + ' '
+    }
+    return out
+}
+
+// Render the suite -> worker -> duration table (longest first) plus per-worker totals.
+// Returns a plain string; the caller echoes/writes it (no pipeline steps in @NonCPS).
+@NonCPS
+String renderRunSummary() {
+    if (SUITE_RESULTS.isEmpty()) {
+        return 'MTR dynamic run summary: no suites were run.'
+    }
+    def rows = ([] + SUITE_RESULTS).sort { a, b -> b.secs <=> a.secs }   // copy, then longest-first
+    def lines = []
+    lines += ['==== MTR dynamic run summary (longest first) ====']
+    lines += [pad('SUITE', 38) + pad('WORKER', 8) + pad('SEQ', 6) + pad('SECONDS', 10) + 'STATUS']
+    long total = 0
+    def byWorker = [:]
+    rows.each { r ->
+        total += r.secs
+        byWorker = byWorker + [(r.worker): ((byWorker[r.worker] ?: 0) + r.secs)]
+        lines += [pad(r.suite, 38) + pad('w' + r.worker, 8) + pad('' + r.seq, 6) + pad('' + r.secs, 10) + r.status]
+    }
+    lines += ['---- per-worker busy time (seconds) ----']
+    byWorker.each { w, secs -> lines += [pad('worker ' + w, 38) + secs] }
+    lines += ["total suite-seconds: ${total}  (items: ${rows.size()})"]
+    return lines.join('\n')
 }
 
 // De-duplicate preserving order, using only whitelisted ops (contains + reassignment).
@@ -920,8 +961,8 @@ pipeline {
                 stage('Test') {
                     steps {
                         script {
-                            int numWorkers = (env.MTR_NUM_WORKERS ?: '8') as int
-                            echo "Dynamic MTR: ${queueSize()} suites queued, ${numWorkers} workers requested"
+                            int requestedWorkers = (env.MTR_NUM_WORKERS ?: '8') as int
+                            int queued = queueSize()
 
                             // Whether the primary worker should run the unit/CIFS/KV/ps-protocol/standalone pass.
                             boolean runSpecial = (env.FULL_MTR == 'yes') ||
@@ -931,10 +972,17 @@ pipeline {
                                                  (env.MTR_STANDALONE_TESTS?.trim() as boolean)
 
                             // Nothing to do at all (e.g. FULL_MTR=skip_mtr with empty queue).
-                            if (queueSize() == 0 && !runSpecial) {
+                            if (queued == 0 && !runSpecial) {
                                 echo 'No suites queued and no special work requested - skipping Test phase.'
                                 return
                             }
+
+                            // Right-size workers: never spin up more agents than there is work.
+                            // Cap at the queue size, but keep at least 1 (the primary still has to
+                            // run special work even when the queue is empty). This avoids allocating
+                            // idle nodes for a small rerun.
+                            int numWorkers = Math.min(requestedWorkers, Math.max(queued, 1))
+                            echo "Dynamic MTR: ${queued} suites queued, using ${numWorkers} worker(s) (requested ${requestedWorkers})"
 
                             // Factory so each closure captures its worker id by value (avoids the
                             // classic mutable-loop-variable capture bug in dynamic parallel).
@@ -949,16 +997,22 @@ pipeline {
                                             dockerEcrLogin()   // log in + cache image once; per-suite runs skip it
                                             try {
                                                 if (primary && runSpecial) {
+                                                    long st0 = System.currentTimeMillis()
+                                                    String sst = 'pass'
                                                     catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                                                         try {
                                                             runSpecialWork(workerId)
                                                         } catch (err) {
+                                                            sst = 'fail'
                                                             recordSpecialFailures(
                                                                 env.CI_FS_MTR?.trim() == 'yes',
                                                                 env.KEYRING_VAULT_MTR?.trim() == 'yes',
                                                                 env.WITH_PS_PROTOCOL?.trim() == 'yes',
                                                                 env.MTR_STANDALONE_TESTS?.trim() as boolean)
                                                             throw err
+                                                        } finally {
+                                                            recordSuiteResult('(special: unit/KV/CIFS/ps)', workerId, 0,
+                                                                (long)((System.currentTimeMillis() - st0) / 1000), sst)
                                                         }
                                                     }
                                                 }
@@ -968,13 +1022,18 @@ pipeline {
                                                     seq++
                                                     echo "[worker ${workerId}] picked '${suite}' (seq ${seq}); ~${queueSize()} left"
                                                     markRunning(suite, "worker-${workerId}")
+                                                    long t0 = System.currentTimeMillis()
+                                                    String status = 'pass'
                                                     catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                                                         try {
                                                             runOneSuite(workerId, seq, suite)
                                                         } catch (err) {
+                                                            status = 'fail'
                                                             recordFailedSuite(suite)
                                                             throw err
                                                         } finally {
+                                                            recordSuiteResult(suite, workerId, seq,
+                                                                (long)((System.currentTimeMillis() - t0) / 1000), status)
                                                             markDone(suite)
                                                         }
                                                     }
@@ -1031,6 +1090,15 @@ pipeline {
             }
         }
         always {
+            script {
+                // Emit the suite -> worker -> duration table (and archive it for tuning / feeding
+                // the heavy-suite ordering). Runs on the pipeline agent; SUITE_RESULTS lives on the
+                // controller heap so it is visible here regardless of which node ran the suites.
+                def summary = renderRunSummary()
+                echo summary
+                writeFile file: 'run-summary.txt', text: summary
+                archiveArtifacts artifacts: 'run-summary.txt', allowEmptyArchive: true
+            }
             triggerFailedSuitesRerun()
             echo "Finish: ${(long)(System.currentTimeMillis() / 1000)}"
         }
