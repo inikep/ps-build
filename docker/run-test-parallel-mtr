@@ -18,9 +18,24 @@ set -o xtrace
 KEEP_BUILD=${KEEP_BUILD:-no}
 EXECUTE_SUITES_ONE_BY_ONE=${EXECUTE_SUITES_ONE_BY_ONE:-no}
 
+# Optimizations used by the dynamic work-queue pipeline, where a single worker
+# runs many suites as separate invocations on the same node:
+#   REUSE_EXTRACT        - skip re-extracting binary.tar.gz if the tree is present
+#   SKIP_RESULTS_TARBALL - skip the per-invocation mtr_var tarball (the dynamic
+#                          pipeline tars the accumulated mtr_var once at worker end)
+# Both default to the legacy behaviour so the static pipeline is unaffected.
+REUSE_EXTRACT=${REUSE_EXTRACT:-no}
+SKIP_RESULTS_TARBALL=${SKIP_RESULTS_TARBALL:-no}
+
 DOCKER_OS=${1:-ubuntu:jammy}
 SOURCE_IMAGE=${DOCKER_OS//:/-}
 WORKER_NO=${2:-0}
+
+# MTR_RUN_TAG uniquely labels the output of a single invocation. The dynamic
+# pipeline passes "<worker>_<seq>_<suite>" so that logs/walltimes/results from
+# many suites run by one worker don't overwrite each other. Falls back to
+# WORKER_NO, preserving the legacy file names for the static pipeline.
+MTR_RUN_TAG=${MTR_RUN_TAG:-$WORKER_NO}
 
 ARCH_SUFFIX=""
 if [[ $(uname -m) == "aarch64" ]]; then
@@ -124,6 +139,9 @@ docker run --rm --shm-size=32G \
     export WITH_ROCKSDB='${WITH_ROCKSDB}'
     export KEEP_BUILD='${KEEP_BUILD}'
     export EXECUTE_SUITES_ONE_BY_ONE='${EXECUTE_SUITES_ONE_BY_ONE}'
+    export MTR_RUN_TAG='${MTR_RUN_TAG}'
+    export REUSE_EXTRACT='${REUSE_EXTRACT}'
+    export SKIP_RESULTS_TARBALL='${SKIP_RESULTS_TARBALL}'
     export USER='mysql'
 
     sudo chown mysql:mysql /tmp/work
@@ -133,31 +151,31 @@ docker run --rm --shm-size=32G \
 
     sudo chown $(id -u):$(id -g) /tmp/work
     sudo chown -R $(id -u):$(id -g) /tmp/work/results
-" 2>&1 | tee ${WORK_DIR}/mtr-test_${WORKER_NO}.log
+" 2>&1 | tee ${WORK_DIR}/mtr-test_${MTR_RUN_TAG}.log
 
 cd $WORK_DIR
 whoami
 ls -l
 
 mkdir -p ${WORK_DIR}/walltimes
-grep -E "Logging:|seconds executing testcase" mtr-test_${WORKER_NO}.log >${WORK_DIR}/walltimes/walltime_${WORKER_NO}.txt
+grep -E "Logging:|seconds executing testcase" mtr-test_${MTR_RUN_TAG}.log >${WORK_DIR}/walltimes/walltime_${MTR_RUN_TAG}.txt
 
 if [[ "$ANALYZER_OPTS" == *"-DWITH_VALGRIND=ON"* ]]; then
-    mv mtr-test_${WORKER_NO}.log mtr-test_${WORKER_NO}_full.log
-    zstd -c mtr-test_${WORKER_NO}_full.log > mtr-test_${WORKER_NO}_full.log.zst
+    mv mtr-test_${MTR_RUN_TAG}.log mtr-test_${MTR_RUN_TAG}_full.log
+    zstd -c mtr-test_${MTR_RUN_TAG}_full.log > mtr-test_${MTR_RUN_TAG}_full.log.zst
 
     source ${SCRIPTS_DIR}/utils.inc.sh
-    filter_valgrind_log mtr-test_${WORKER_NO}_full.log mtr-test_${WORKER_NO}.log
-    rm -rf mtr-test_${WORKER_NO}_full.log
+    filter_valgrind_log mtr-test_${MTR_RUN_TAG}_full.log mtr-test_${MTR_RUN_TAG}.log
+    rm -rf mtr-test_${MTR_RUN_TAG}_full.log
 
-    grep -A16 "Conditional jump or move depends on uninitialised" mtr-test_${WORKER_NO}.log >mtr-test_${WORKER_NO}-valgrind-ConditionalJump.log || :
-    grep -A16 "are definitely lost"          mtr-test_${WORKER_NO}.log >mtr-test_${WORKER_NO}-valgrind-definitelyLost.log || :
-    grep -B128 -A128 "Invalid read of size"  mtr-test_${WORKER_NO}.log >mtr-test_${WORKER_NO}-valgrind-InvalidRead.log || :
-    grep -B128 -A128 "Invalid write of size" mtr-test_${WORKER_NO}.log >mtr-test_${WORKER_NO}-valgrind-InvalidWrite.log || :
+    grep -A16 "Conditional jump or move depends on uninitialised" mtr-test_${MTR_RUN_TAG}.log >mtr-test_${MTR_RUN_TAG}-valgrind-ConditionalJump.log || :
+    grep -A16 "are definitely lost"          mtr-test_${MTR_RUN_TAG}.log >mtr-test_${MTR_RUN_TAG}-valgrind-definitelyLost.log || :
+    grep -B128 -A128 "Invalid read of size"  mtr-test_${MTR_RUN_TAG}.log >mtr-test_${MTR_RUN_TAG}-valgrind-InvalidRead.log || :
+    grep -B128 -A128 "Invalid write of size" mtr-test_${MTR_RUN_TAG}.log >mtr-test_${MTR_RUN_TAG}-valgrind-InvalidWrite.log || :
 fi
 
 if [[ "$ANALYZER_OPTS" == *"-DWITH_ASAN=ON"* ]]; then
-    grep -A16 "ERROR: .*Sanitizer"          mtr-test_${WORKER_NO}.log >mtr-test_${WORKER_NO}-Errors-Sanitizers.log || :
-    grep -A16 "ERROR: AddressSanitizer"     mtr-test_${WORKER_NO}.log >mtr-test_${WORKER_NO}-Errors-AddressSanitizer.log || :
-    grep -A16 "ERROR: LeakSanitizer"        mtr-test_${WORKER_NO}.log >mtr-test_${WORKER_NO}-Errors-LeakSanitizer.log || :
+    grep -A16 "ERROR: .*Sanitizer"          mtr-test_${MTR_RUN_TAG}.log >mtr-test_${MTR_RUN_TAG}-Errors-Sanitizers.log || :
+    grep -A16 "ERROR: AddressSanitizer"     mtr-test_${MTR_RUN_TAG}.log >mtr-test_${MTR_RUN_TAG}-Errors-AddressSanitizer.log || :
+    grep -A16 "ERROR: LeakSanitizer"        mtr-test_${MTR_RUN_TAG}.log >mtr-test_${MTR_RUN_TAG}-Errors-LeakSanitizer.log || :
 fi
