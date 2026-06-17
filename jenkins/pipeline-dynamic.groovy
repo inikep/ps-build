@@ -58,6 +58,16 @@ FAILED_SUITES  = []   // suites/specials to rerun
 RUNNING_SUITES = [:]  // suite -> "worker-N"
 SUITE_RESULTS  = []   // per-suite timing for the end-of-run summary: [suite,worker,seq,secs,status]
 
+// Spot-kill hardening: a suite that fails (e.g. its worker's spot instance was reclaimed) is
+// pushed back here and handed out again — before the main queue — so a healthy worker reruns
+// it instead of it being lost. REQUEUE_COUNT caps re-queues per suite so a deterministically
+// broken suite can't bounce forever; past the cap it is recorded as failed (-> rerun/RESUME).
+REQUEUE        = []
+REQUEUE_INDEX  = 0
+REQUEUE_COUNT  = [:]
+MAX_REQUEUE    = 2    // max times one suite may be pushed back before it is given up on
+MAX_CONSEC_FAIL = 3   // consecutive failures after which a worker assumes its node is unhealthy and leaves
+
 // Heavy suites are split into separate "|nobig" and "|big" queue items so the two halves
 // can run on different workers (a bare suite would run both back-to-back on one worker).
 // Ranked heaviest-first from the PS80 Valgrind walltimes
@@ -72,6 +82,12 @@ HEAVY_SUITES = ['innodb', 'main', 'group_replication', 'rpl', 'clone', 'rpl_gtid
 // and NO Collection mutator calls (see note above).
 @NonCPS
 String nextSuite() {
+    // Re-queued suites (from a failed/killed worker) take priority over the main queue.
+    if (REQUEUE_INDEX < REQUEUE.size()) {
+        String s = REQUEUE[REQUEUE_INDEX]
+        REQUEUE_INDEX = REQUEUE_INDEX + 1
+        return s
+    }
     if (NEXT_INDEX >= ALL_SUITES.size()) {
         return null   // null == queue drained
     }
@@ -82,7 +98,7 @@ String nextSuite() {
 
 @NonCPS
 int queueSize() {
-    int remaining = ALL_SUITES.size() - NEXT_INDEX
+    int remaining = (ALL_SUITES.size() - NEXT_INDEX) + (REQUEUE.size() - REQUEUE_INDEX)
     return remaining < 0 ? 0 : remaining
 }
 
@@ -95,6 +111,33 @@ void loadQueue(List items) {
 @NonCPS
 void recordFailedSuite(String suite) {
     FAILED_SUITES = FAILED_SUITES + [suite]
+}
+
+// Push a failed suite back onto the queue for another worker, up to MAX_REQUEUE times.
+// Returns true if re-queued, false if the cap is hit (then it is recorded as failed instead).
+@NonCPS
+boolean requeueOrFail(String suite) {
+    int n = (REQUEUE_COUNT[suite] ?: 0)
+    if (n >= MAX_REQUEUE) {
+        FAILED_SUITES = FAILED_SUITES + [suite]
+        return false
+    }
+    REQUEUE_COUNT = REQUEUE_COUNT + [(suite): (n + 1)]
+    REQUEUE = REQUEUE + [suite]
+    return true
+}
+
+// Safety net run after all workers finish: anything still re-queued-but-unserved, or still
+// marked running (a worker died before its own sweep), is recorded as failed so the rerun /
+// RESUME path can pick it up. Nothing gets silently dropped.
+@NonCPS
+void finalizeOrphans() {
+    def leftover = []
+    for (int i = REQUEUE_INDEX; i < REQUEUE.size(); i++) {
+        leftover = leftover + [REQUEUE[i]]
+    }
+    RUNNING_SUITES.each { k, v -> leftover = leftover + [k] }
+    FAILED_SUITES = FAILED_SUITES + leftover
 }
 
 @NonCPS
@@ -1075,28 +1118,46 @@ pipeline {
                                                     }
                                                 }
                                                 int seq = 0
+                                                int consecFail = 0
                                                 String suite
                                                 while ((suite = nextSuite()) != null) {
                                                     seq++
                                                     echo "[worker ${workerId}] picked '${suite}' (seq ${seq}); ~${queueSize()} left"
                                                     markRunning(suite, "worker-${workerId}")
                                                     long t0 = System.currentTimeMillis()
-                                                    String status = 'pass'
-                                                    catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
-                                                        try {
-                                                            runOneSuite(workerId, seq, suite)
-                                                            // Checkpoint only on success: a RESUME run then re-runs
-                                                            // both failed and never-started suites, so failures get
-                                                            // another chance even if the crash skipped the rerun trigger.
-                                                            recordCheckpoint(workerId, suite)
-                                                        } catch (err) {
-                                                            status = 'fail'
-                                                            recordFailedSuite(suite)
-                                                            throw err
-                                                        } finally {
-                                                            recordSuiteResult(suite, workerId, seq,
-                                                                (long)((System.currentTimeMillis() - t0) / 1000), status)
-                                                            markDone(suite)
+                                                    boolean ok = false
+                                                    try {
+                                                        runOneSuite(workerId, seq, suite)
+                                                        // Checkpoint only on success: a RESUME run then re-runs both
+                                                        // failed and never-started suites, so failures get another
+                                                        // chance even if a crash skipped the rerun trigger.
+                                                        recordCheckpoint(workerId, suite)
+                                                        ok = true
+                                                    } catch (err) {
+                                                        echo "[worker ${workerId}] suite '${suite}' errored: ${err}"
+                                                    } finally {
+                                                        recordSuiteResult(suite, workerId, seq,
+                                                            (long)((System.currentTimeMillis() - t0) / 1000), ok ? 'pass' : 'fail')
+                                                        markDone(suite)
+                                                    }
+                                                    if (ok) {
+                                                        consecFail = 0
+                                                    } else {
+                                                        unstable("worker ${workerId}: suite '${suite}' failed")
+                                                        // Spot-kill hardening: push the suite back for a healthy worker
+                                                        // rather than losing it; if it repeatedly fails, give up on it.
+                                                        if (requeueOrFail(suite)) {
+                                                            echo "[worker ${workerId}] re-queued '${suite}' for another worker"
+                                                        } else {
+                                                            echo "[worker ${workerId}] '${suite}' exceeded re-queue cap; recorded as failed"
+                                                        }
+                                                        // Circuit breaker: a worker whose spot instance was reclaimed
+                                                        // would otherwise spin, failing every suite it pulls (a "vacuum").
+                                                        // After a few consecutive failures, assume the node is unhealthy
+                                                        // and leave the drain so healthy workers take over.
+                                                        if (++consecFail >= MAX_CONSEC_FAIL) {
+                                                            echo "[worker ${workerId}] ${consecFail} consecutive failures - node likely unhealthy, leaving drain"
+                                                            break
                                                         }
                                                     }
                                                 }
@@ -1104,8 +1165,10 @@ pipeline {
                                             } finally {
                                                 // rescue any in-flight suite interrupted by an abort
                                                 sweepRunningToFailed("worker-${workerId}")
-                                                archiveWorkerArtifacts(workerId)
-                                                cleanWorkspace(workerId)
+                                                // Best-effort: if the node is gone these will throw; don't let that
+                                                // mask the run or fail the branch.
+                                                try { archiveWorkerArtifacts(workerId) } catch (e) { echo "[worker ${workerId}] archive skipped (node may be down): ${e}" }
+                                                try { cleanWorkspace(workerId) }          catch (e) { echo "[worker ${workerId}] cleanup skipped: ${e}" }
                                             }
                                         }
                                     }
@@ -1145,8 +1208,8 @@ pipeline {
                                             } finally {
                                                 recordSuiteResult("(special: ${tag})", workerId, 0,
                                                     (long)((System.currentTimeMillis() - t0) / 1000), status)
-                                                archiveWorkerArtifacts(workerId)
-                                                cleanWorkspace(workerId)
+                                                try { archiveWorkerArtifacts(workerId) } catch (e) { echo "[${tag}] archive skipped (node may be down): ${e}" }
+                                                try { cleanWorkspace(workerId) }          catch (e) { echo "[${tag}] cleanup skipped: ${e}" }
                                             }
                                         }
                                     }
@@ -1162,6 +1225,11 @@ pipeline {
                             if (runPs)   { branches['PS Protocol']   = makeSpecialWorker(93, 'ps',   false, false, true)  }
                             branches.failFast = false
                             parallel branches
+
+                            // Safety net: record anything re-queued-but-unserved or still marked
+                            // running (a worker died before its own sweep) so the rerun / RESUME
+                            // path picks it up. Nothing is silently dropped.
+                            finalizeOrphans()
                         }
                     }
                 }
