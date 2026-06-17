@@ -259,6 +259,26 @@ void cleanWorkspace(Integer WORKER_ID) {
     """
 }
 
+// Log in to ECR and pull the build image ONCE per worker. Each suite then runs as a
+// separate "docker run", but because the image is already cached locally those runs need
+// no further ECR login (the public token would otherwise be fetched per suite). Public
+// ECR tokens expire after ~12h, but that is irrelevant here: a cached local image is used
+// regardless of token state, so even multi-hour valgrind drains are fine.
+void dockerEcrLogin() {
+    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', accessKeyVariable: 'AWS_ACCESS_KEY_ID', credentialsId: AWS_CREDENTIALS_ID, secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']]) {
+        sh """#!/bin/bash
+            set -o errexit
+            ARCH_SUFFIX=""
+            if [[ \$(uname -m) == "aarch64" ]]; then ARCH_SUFFIX="-aarch64"; fi
+            SOURCE_IMAGE=\$(echo "${DOCKER_OS}" | tr ':' '-')
+            IMAGE="public.ecr.aws/e7j3v3n0/ps-build:\${SOURCE_IMAGE}\${ARCH_SUFFIX}"
+            echo "ECR login + image cache (once per worker): \$IMAGE"
+            aws ecr-public get-login-password --region us-east-1 | docker login -u AWS --password-stdin public.ecr.aws/e7j3v3n0
+            sg docker -c "docker pull \$IMAGE"
+        """
+    }
+}
+
 // Run one MTR invocation inside the build docker image. SUITES is normally a SINGLE suite
 // token pulled from the queue; for the primary worker's special pass it is empty and only
 // the unit/CIFS/keyring-vault/ps-protocol bits run. MTR_RUN_TAG makes per-suite output file
@@ -327,7 +347,9 @@ void doTests(String WORKER_ID, String SUITES, String STANDALONE_TESTS = '', bool
                 export REUSE_EXTRACT=yes
                 export SKIP_RESULTS_TARBALL=yes
 
-                aws ecr-public get-login-password --region us-east-1 | docker login -u AWS --password-stdin public.ecr.aws/e7j3v3n0
+                # NOTE: no "docker login" here. dockerEcrLogin() already logged in and pulled
+                # the image once for this worker, so each per-suite "docker run" reuses the
+                # locally-cached image with no extra ECR round-trip.
                 sg docker -c "
                     if [ \$(docker ps -a -q | wc -l) -ne 0 ]; then
                         docker ps -q | xargs docker stop --time 1 || :
@@ -924,6 +946,7 @@ pipeline {
                                             // primary reuses the build node: keep sources/+work/build for unit tests
                                             prepareWorkspace(workerId, primary)
                                             downloadFilesForTests()
+                                            dockerEcrLogin()   // log in + cache image once; per-suite runs skip it
                                             try {
                                                 if (primary && runSpecial) {
                                                     catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
