@@ -20,8 +20,14 @@ for logfile in "$@"; do
     current_suite=""
 
     while IFS= read -r line; do
-        # Extract suite from --junit-package
-        if [[ "$line" =~ --junit-package=.*\.WORKER_[0-9]+\.(.*) ]]; then
+        # Extract suite from --junit-package.
+        # New dynamic-pipeline tag: ...WORKER_<worker>_<seq>_<suite>[-big|-nobig]
+        # Old static format:        ...WORKER_<N>.<suite>
+        # Match the new format first, fall back to the old one. [^[:space:]]+ stops at the
+        # next MTR argument instead of swallowing the rest of the line.
+        if [[ "$line" =~ --junit-package=[^[:space:]]*\.WORKER_[0-9]+_[0-9]+_([^[:space:]]+) ]]; then
+            current_suite="${BASH_REMATCH[1]}"
+        elif [[ "$line" =~ --junit-package=[^[:space:]]*\.WORKER_[0-9]+\.([^[:space:]]+) ]]; then
             current_suite="${BASH_REMATCH[1]}"
         fi
 
