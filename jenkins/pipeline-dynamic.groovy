@@ -1174,7 +1174,7 @@ pipeline {
                                                 if (primary && runUnit) {
                                                     long st0 = System.currentTimeMillis()
                                                     String sst = 'pass'
-                                                    catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                                                    catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE', catchInterruptions: false) {
                                                         try {
                                                             runUnitWork(workerId)
                                                         } catch (err) {
@@ -1204,6 +1204,12 @@ pipeline {
                                                         // chance even if a crash skipped the rerun trigger.
                                                         recordCheckpoint(workerId, suite)
                                                         ok = true
+                                                    } catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException ie) {
+                                                        // An abort/timeout interruption must NOT be swallowed, or the
+                                                        // worker would just pull the next suite and the build couldn't
+                                                        // be stopped. Rethrow so the branch (and the build) aborts; the
+                                                        // finally below + the outer sweepRunningToFailed still record it.
+                                                        throw ie
                                                     } catch (err) {
                                                         echo "[worker ${workerId}] suite '${suite}' errored: ${err}"
                                                     } finally {
@@ -1279,7 +1285,7 @@ pipeline {
                                             long t0 = System.currentTimeMillis()
                                             String status = 'pass'
                                             try {
-                                                catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                                                catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE', catchInterruptions: false) {
                                                     try {
                                                         doTests(workerId.toString(), '', '', false, cifs, kv, ps, tag, kvVariant)
                                                     } catch (err) {
