@@ -392,7 +392,7 @@ void dockerEcrLogin() {
 // token pulled from the queue; for the primary worker's special pass it is empty and only
 // the unit/CIFS/keyring-vault/ps-protocol bits run. MTR_RUN_TAG makes per-suite output file
 // names unique so many suites on one node don't overwrite each other.
-void doTests(String WORKER_ID, String SUITES, String STANDALONE_TESTS = '', boolean UNIT_TESTS = false, boolean CIFS_TESTS = false, boolean KV_TESTS = false, boolean PS_PROTOCOL_TESTS = false, String MTR_RUN_TAG = '') {
+void doTests(String WORKER_ID, String SUITES, String STANDALONE_TESTS = '', boolean UNIT_TESTS = false, boolean CIFS_TESTS = false, boolean KV_TESTS = false, boolean PS_PROTOCOL_TESTS = false, String MTR_RUN_TAG = '', String KV_VARIANT = 'all') {
     withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', accessKeyVariable: 'AWS_ACCESS_KEY_ID', credentialsId: AWS_CREDENTIALS_ID, secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']]) {
         withCredentials([
             string(credentialsId: VAULT_V1_DEV_ROOT_TOKEN, variable: VAULT_V1_DEV_ROOT_TOKEN),
@@ -455,6 +455,7 @@ void doTests(String WORKER_ID, String SUITES, String STANDALONE_TESTS = '', bool
                 export MTR_RUN_TAG="${MTR_RUN_TAG}"
                 export REUSE_EXTRACT=yes
                 export SKIP_RESULTS_TARBALL=yes
+                export KV_VARIANT="${KV_VARIANT}"
 
                 # NOTE: no "docker login" here. dockerEcrLogin() already logged in and pulled
                 # the image once for this worker, so each per-suite "docker run" reuses the
@@ -1234,7 +1235,7 @@ pipeline {
                             // with the suite drain, so it never sits on worker 1's critical path.
                             // workerId/tag are distinct (90s) so artifacts don't collide with the
                             // suite workers (1..N).
-                            def makeSpecialWorker = { int workerId, String tag, boolean cifs, boolean kv, boolean ps ->
+                            def makeSpecialWorker = { int workerId, String tag, boolean cifs, boolean kv, boolean ps, String kvVariant = 'all' ->
                                 return {
                                     node(LABEL) {
                                         timeout(time: PIPELINE_TIMEOUT, unit: 'HOURS') {
@@ -1247,7 +1248,7 @@ pipeline {
                                             try {
                                                 catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                                                     try {
-                                                        doTests(workerId.toString(), '', '', false, cifs, kv, ps, tag)
+                                                        doTests(workerId.toString(), '', '', false, cifs, kv, ps, tag, kvVariant)
                                                     } catch (err) {
                                                         status = 'fail'
                                                         recordSpecialFailures(cifs, kv, ps, false)
@@ -1269,9 +1270,18 @@ pipeline {
                             for (int i = 1; i <= numWorkers; i++) {
                                 branches["Test ${i}"] = makeWorker(i, i == 1)
                             }
-                            if (runKv)   { branches['Keyring Vault'] = makeSpecialWorker(91, 'kv',   false, true,  false) }
-                            if (runCifs) { branches['CI FS']         = makeSpecialWorker(92, 'cifs', true,  false, false) }
-                            if (runPs)   { branches['PS Protocol']   = makeSpecialWorker(93, 'ps',   false, false, true)  }
+                            // keyring-vault is decoupled further: its 4 variants (dev/prod x v1/v2)
+                            // run on separate concurrent branches instead of serially, so the KV
+                            // critical path drops from their sum (~83 min) toward the slowest single
+                            // variant (~26 min). KV_VARIANT tells the runner which one to bootstrap+run.
+                            if (runKv) {
+                                branches['KV dev_v1']  = makeSpecialWorker(91, 'kv_dev_v1',  false, true, false, 'dev_v1')
+                                branches['KV dev_v2']  = makeSpecialWorker(94, 'kv_dev_v2',  false, true, false, 'dev_v2')
+                                branches['KV prod_v1'] = makeSpecialWorker(95, 'kv_prod_v1', false, true, false, 'prod_v1')
+                                branches['KV prod_v2'] = makeSpecialWorker(96, 'kv_prod_v2', false, true, false, 'prod_v2')
+                            }
+                            if (runCifs) { branches['CI FS']       = makeSpecialWorker(92, 'cifs', true,  false, false) }
+                            if (runPs)   { branches['PS Protocol'] = makeSpecialWorker(93, 'ps',   false, false, true)  }
                             branches.failFast = false
                             parallel branches
 
