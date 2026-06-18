@@ -159,10 +159,14 @@ void sweepRunningToFailed(String owner) {
     RUNNING_SUITES = RUNNING_SUITES.findAll { k, v -> v != owner }
 }
 
-// Record one suite's wall-clock result for the end-of-run summary (reassignment, no mutators).
+// Record one suite's result for the end-of-run summary (reassignment, no mutators).
+// The diagnostic fields (spent/timeouts/fails/badTest) default to 0/'' for callers that
+// don't parse them (the special/unit branches); suite workers fill them from the MTR log.
 @NonCPS
-void recordSuiteResult(String suite, int worker, int seq, long secs, String status) {
-    SUITE_RESULTS = SUITE_RESULTS + [[suite: suite, worker: worker, seq: seq, secs: secs, status: status]]
+void recordSuiteResult(String suite, int worker, int seq, long secs, String status,
+                       int spent = 0, int timeouts = 0, int fails = 0, String badTest = '') {
+    SUITE_RESULTS = SUITE_RESULTS + [[suite: suite, worker: worker, seq: seq, secs: secs, status: status,
+                                      spent: spent, timeouts: timeouts, fails: fails, badTest: badTest]]
 }
 
 // Right-pad a string to width n using only whitelisted String ops (no String.format).
@@ -185,17 +189,32 @@ String renderRunSummary() {
     def rows = ([] + SUITE_RESULTS).sort { a, b -> b.secs <=> a.secs }   // copy, then longest-first
     def lines = []
     lines += ['==== MTR dynamic run summary (longest first) ====']
-    lines += [pad('SUITE', 38) + pad('WORKER', 8) + pad('SEQ', 6) + pad('SECONDS', 10) + 'STATUS']
+    // PAR = effective parallelism (cumulative test-seconds / wall): a low value means the
+    // suite ran mostly serial (e.g. one hung test holding a thread). NOTE flags timeouts/fails.
+    lines += [pad('SUITE', 38) + pad('WORKER', 8) + pad('SEQ', 6) + pad('WALL', 8) + pad('PAR', 7) + pad('STATUS', 9) + 'NOTE']
+    def anomalies = []
     long total = 0
     def byWorker = [:]
     rows.each { r ->
         total += r.secs
         byWorker = byWorker + [(r.worker): ((byWorker[r.worker] ?: 0) + r.secs)]
-        lines += [pad(r.suite, 38) + pad('w' + r.worker, 8) + pad('' + r.seq, 6) + pad('' + r.secs, 10) + r.status]
+        int spent = (r.spent ?: 0)
+        int r10 = (r.secs > 0 && spent > 0) ? (int)(spent * 10L / r.secs) : 0
+        String par = spent > 0 ? ((r10 / 10) + '.' + (r10 % 10) + 'x') : '-'
+        String note = ''
+        if ((r.timeouts ?: 0) > 0)   note = "TIMEOUT x${r.timeouts}: ${r.badTest}"
+        else if ((r.fails ?: 0) > 0) note = "FAIL x${r.fails}: ${r.badTest}"
+        if (note) { anomalies += ["${r.suite} (w${r.worker}): ${note}"] }
+        lines += [pad(r.suite, 38) + pad('w' + r.worker, 8) + pad('' + r.seq, 6) +
+                  pad('' + r.secs, 8) + pad(par, 7) + pad(r.status, 9) + note]
     }
     lines += ['---- per-worker busy time (seconds) ----']
     byWorker.each { w, secs -> lines += [pad('worker ' + w, 38) + secs] }
     lines += ["total suite-seconds: ${total}  (items: ${rows.size()})"]
+    if (anomalies) {
+        lines += ['---- anomalies (timeouts / failures) ----']
+        anomalies.each { lines += [it] }
+    }
     return lines.join('\n')
 }
 
@@ -452,10 +471,28 @@ void doTests(String WORKER_ID, String SUITES, String STANDALONE_TESTS = '', bool
     }  // withCredentials
 }
 
+// Unique per-run tag for a suite (drives the output file names). Shared by runOneSuite and
+// the post-run diagnostics so both point at the same mtr-test_<tag>.log / walltime_<tag>.txt.
+@NonCPS
+String suiteTag(int workerId, int seq, String suite) {
+    return "${workerId}_${seq}_" + suite.replaceAll('[^A-Za-z0-9]', '_')
+}
+
 // Run a single suite pulled from the queue (normal work, no special bits).
 void runOneSuite(Integer WORKER_ID, Integer SEQ, String SUITE) {
-    String tag = "${WORKER_ID}_${SEQ}_" + SUITE.replaceAll('[^A-Za-z0-9]', '_')
-    doTests(WORKER_ID.toString(), SUITE, '', false, false, false, false, tag)
+    doTests(WORKER_ID.toString(), SUITE, '', false, false, false, false, suiteTag(WORKER_ID, SEQ, SUITE))
+}
+
+// Parse a finished suite's MTR log + walltime file for the diagnostics table (runs on the
+// worker node, where the files live). Returns spent/timeouts/fails/badTest as strings.
+def suiteDiagnostics(String tag) {
+    String raw = sh(returnStdout: true, script:
+        "bash local/mtr-suite-diag.sh '${WORK_DIR}/walltimes/walltime_${tag}.txt' '${WORK_DIR}/mtr-test_${tag}.log' 2>/dev/null || echo '0|0|0|'").trim()
+    def p = raw.split('\\|')
+    return [spent:    (p.length > 0 && p[0] ? p[0] : '0'),
+            timeouts: (p.length > 1 && p[1] ? p[1] : '0'),
+            fails:    (p.length > 2 && p[2] ? p[2] : '0'),
+            badTest:  (p.length > 3 ? p[3] : '')]
 }
 
 // Primary-worker-only: unit tests + standalone tests. These need the original build tree
@@ -1136,8 +1173,20 @@ pipeline {
                                                     } catch (err) {
                                                         echo "[worker ${workerId}] suite '${suite}' errored: ${err}"
                                                     } finally {
-                                                        recordSuiteResult(suite, workerId, seq,
-                                                            (long)((System.currentTimeMillis() - t0) / 1000), ok ? 'pass' : 'fail')
+                                                        long durSecs = (long)((System.currentTimeMillis() - t0) / 1000)
+                                                        // Parse the MTR log for parallelism + timeouts/failures. MTR masks
+                                                        // test failures (--max-test-fail=0 || true) so runOneSuite returns
+                                                        // OK even when tests failed/timed out; the diagnostics recover that.
+                                                        def diag = [spent: '0', timeouts: '0', fails: '0', badTest: '']
+                                                        if (ok) {
+                                                            try { diag = suiteDiagnostics(suiteTag(workerId, seq, suite)) }
+                                                            catch (e) { echo "[worker ${workerId}] diag parse skipped: ${e}" }
+                                                        }
+                                                        String st = !ok ? 'infra-fail'
+                                                                  : ((diag.timeouts as int) > 0 ? 'timeout'
+                                                                  : ((diag.fails as int) > 0 ? 'fail' : 'pass'))
+                                                        recordSuiteResult(suite, workerId, seq, durSecs, st,
+                                                            diag.spent as int, diag.timeouts as int, diag.fails as int, diag.badTest)
                                                         markDone(suite)
                                                     }
                                                     if (ok) {
