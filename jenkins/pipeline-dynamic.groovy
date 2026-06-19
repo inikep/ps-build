@@ -179,6 +179,22 @@ String pad(String s, int n) {
     return out
 }
 
+// One-line live progress string for the build-page description (NOT the console). Rendered
+// purely from the shared state; sandbox-safe ops only and no pipeline steps (it's @NonCPS).
+@NonCPS
+String progressLine() {
+    int total   = ALL_SUITES.size()
+    int running = RUNNING_SUITES.size()
+    int queued  = (ALL_SUITES.size() - NEXT_INDEX) + (REQUEUE.size() - REQUEUE_INDEX)
+    if (queued < 0) { queued = 0 }
+    // Count real suites only; the unit/CIFS/ps/KV special runs are tagged "(special: ...)".
+    def suites = SUITE_RESULTS.findAll { !it.suite.startsWith('(special') }
+    int fail = suites.findAll { it.status != 'pass' }.size()
+    def now  = RUNNING_SUITES.collect { k, v -> k }.join(', ')
+    return "MTR: ${suites.size()}/${total} suites done (${fail} fail) - " +
+           "${running} running - ${queued} queued" + (now ? " - now: ${now}" : '')
+}
+
 // Render the suite -> worker -> duration table (longest first) plus per-worker totals.
 // Returns a plain string; the caller echoes/writes it (no pipeline steps in @NonCPS).
 @NonCPS
@@ -218,6 +234,13 @@ String renderRunSummary() {
         anomalies.each { lines += [it] }
     }
     return lines.join('\n')
+}
+
+// Publish the live progress line to the build-page description (not the console). Best-effort:
+// must never break a worker. CPS is single-threaded so concurrent calls serialize; each reads
+// the latest state, so last-write-wins reflects reality.
+void updateProgress() {
+    try { currentBuild.description = progressLine() } catch (ignored) { }
 }
 
 // De-duplicate preserving order, using only whitelisted ops (contains + reassignment).
@@ -1185,6 +1208,7 @@ pipeline {
                                                         } finally {
                                                             recordSuiteResult('(special: unit/standalone)', workerId, 0,
                                                                 (long)((System.currentTimeMillis() - st0) / 1000), sst)
+                                                            updateProgress()
                                                         }
                                                     }
                                                 }
@@ -1195,6 +1219,7 @@ pipeline {
                                                     seq++
                                                     echo "[worker ${workerId}] picked '${suite}' (seq ${seq}); ~${queueSize()} left"
                                                     markRunning(suite, "worker-${workerId}")
+                                                    updateProgress()
                                                     long t0 = System.currentTimeMillis()
                                                     boolean ok = false
                                                     try {
@@ -1228,6 +1253,7 @@ pipeline {
                                                         recordSuiteResult(suite, workerId, seq, durSecs, st,
                                                             diag.spent as int, diag.timeouts as int, diag.fails as int, diag.badTest)
                                                         markDone(suite)
+                                                        updateProgress()
                                                     }
                                                     if (ok) {
                                                         consecFail = 0
@@ -1297,6 +1323,7 @@ pipeline {
                                             } finally {
                                                 recordSuiteResult("(special: ${tag})", workerId, 0,
                                                     (long)((System.currentTimeMillis() - t0) / 1000), status)
+                                                updateProgress()
                                                 try { archiveWorkerArtifacts(workerId) } catch (e) { echo "[${tag}] archive skipped (node may be down): ${e}" }
                                                 try { cleanWorkspace(workerId) }          catch (e) { echo "[${tag}] cleanup skipped: ${e}" }
                                             }
