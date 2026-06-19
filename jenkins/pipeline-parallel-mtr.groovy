@@ -261,7 +261,7 @@ void doTestWorkerJobWithoutGuard(Integer WORKER_ID, String SUITES, String STANDA
             echo "[WARNING] Worker ${WORKER_ID} failed with error: ${err}"
             throw err // rethrow so outer catchError or pipeline failure handling still works
         } finally {
-            archiveArtifacts "${WORK_DIR}/*.log*,${WORK_DIR}/walltimes/*.txt,${WORK_DIR}/results/*.xml,${WORK_DIR}/results/ps80-test-mtr_logs-*.tar.gz"
+            archiveArtifacts "${WORK_DIR}/*.log*,${WORK_DIR}/walltimes/*.txt,${WORK_DIR}/results/ps80-test-mtr_logs-*.tar.gz"
 
             // This is questionable. Do we need result XMLs in S3 cache while Jenkins archives them as well?
             syncDirToS3("./${WORK_DIR}/results/", "${BUILD_TAG_BINARIES}", 'mtr_var/*')

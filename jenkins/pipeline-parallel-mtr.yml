@@ -306,8 +306,6 @@
     scripts_branch: '8.0'
     docker_os_list:
       - ubuntu:resolute
-      - ubuntu:noble
-      - debian:bookworm
     sanitizer_opts_list:
       - -DWITH_VALGRIND=ON
     jobs:
@@ -322,8 +320,6 @@
     scripts_branch: '8.0'
     docker_os_list:
       - ubuntu:resolute
-      - ubuntu:noble
-      - debian:bookworm
     sanitizer_opts_list:
       - -DWITH_VALGRIND=ON
     jobs:
@@ -338,8 +334,6 @@
     scripts_branch: '8.0'
     docker_os_list:
       - ubuntu:resolute
-      - ubuntu:noble
-      - debian:bookworm
     sanitizer_opts_list:
       - -DWITH_VALGRIND=ON
     jobs:
