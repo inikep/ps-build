@@ -24,13 +24,18 @@ if [[ $(uname -m) == "aarch64" ]]; then
   ARCH_SUFFIX="-aarch64"
 fi
 
+# For rootless Docker: capture host user/group IDs to fix permissions after build
+# If HOST_UID not set, use current user (useful for local development)
+HOST_UID=${HOST_UID:-$(id -u)}
+HOST_GID=${HOST_GID:-$(id -g)}
+
 ROOT_DIR=$(cd $(dirname $0)/..; pwd -P)
 SCRIPTS_DIR=$ROOT_DIR/local
 SOURCES_DIR=$ROOT_DIR/sources
 
 WORK_DIR=${2:-$ROOT_DIR/${SOURCE_IMAGE}_${CMAKE_BUILD_TYPE}}
-rm -rf $WORK_DIR
-mkdir $WORK_DIR
+rm -rf "${WORK_DIR}" 2>/dev/null || sudo rm -rf "${WORK_DIR}"
+mkdir -p "${WORK_DIR}"
 
 docker run -it --rm \
     --cap-add SYS_PTRACE \
@@ -74,5 +79,17 @@ docker run -it --rm \
     bash
 
     rm -rf /tmp/work/source_downloads
-    sudo chown $(id -u):$(id -g) /tmp/work /tmp/sources /tmp/sources/mysql-test/collections /tmp/sources/storage/rocksdb/rocksdb/util /tmp/sources/rocksdb/util || :
 "
+
+# Fix permissions on the HOST after docker exits. With rootful Docker only WORK_DIR itself and
+# the tarball need to be host-owned; build/ stays mysql's, so the test container doesn't have to
+# chown it back. Under rootless Docker mysql maps to a subordinate uid the host user cannot
+# touch, so the whole output is handed back. In sources/ only the directories the in-container
+# chown above gave to mysql (build-binary generates files there) are restored.
+if docker info -f '{{.SecurityOptions}}' 2>/dev/null | grep -q rootless; then
+    sudo chown -R "${HOST_UID}:${HOST_GID}" "${WORK_DIR}" 2>/dev/null || true
+else
+    sudo chown "${HOST_UID}:${HOST_GID}" "${WORK_DIR}" "${WORK_DIR}"/*.tar.gz 2>/dev/null || true
+fi
+sudo chown "${HOST_UID}:${HOST_GID}" "${SOURCES_DIR}" "${SOURCES_DIR}/mysql-test/collections" \
+    "${SOURCES_DIR}/storage/rocksdb/rocksdb/util" "${SOURCES_DIR}/rocksdb/util" 2>/dev/null || true

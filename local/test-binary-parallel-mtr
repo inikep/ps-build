@@ -664,6 +664,68 @@ if [[ ${KEYRING_VAULT_MTR} == 'yes' ]]; then
     echo KH,SUITE_TOTAL,KEYRING_VAULT_tests,time,$runtime
 fi
 
+if [[ ${KEYRING_KMIP_MTR} == 'yes' ]]; then
+    echo "Running KEYRING_KMIP tests"
+    start=`date +%s`
+
+    MTR_ARGS_KK=${MTR_ARGS}
+
+    if [[ $BIG_TEST == "1" ]]; then
+        MTR_ARGS_KK+=" --big-test"
+    fi
+
+    # mtr below runs with "|| true" like the other specials, so a broken setup or an mtr that
+    # died before running the suite must be caught explicitly. KMIP_FAILED defers the failure
+    # to the end of the script, so the mtr_var tarball still collects the logs of everything
+    # else this invocation already ran.
+    if [[ ! -f /tmp/certs/kmip_vars.sh ]]; then
+        # docker/run-test-parallel-mtr mounts the certs dir whenever KEYRING_KMIP_MTR=yes.
+        echo "ERROR: /tmp/certs/kmip_vars.sh not found; bootstrap-cosmian did not prepare the KMIP runtime"
+        KMIP_FAILED=1
+    elif [[ ! -d ${EXTRACT_DIR}/mysql-test/suite/component_keyring_kmip ]]; then
+        echo "ERROR: KEYRING_KMIP_MTR=yes but this tree has no component_keyring_kmip suite"
+        KMIP_FAILED=1
+    else
+        # Exports KMIP_ADDR/KMIP_PORT/KMIP_CLIENT_CA/KMIP_CLIENT_KEY/KMIP_SERVER_CA for the suite.
+        source /tmp/certs/kmip_vars.sh
+
+        if [[ "${HAVE_JUNIT}" == "1" ]]; then
+            JUNIT_KMIP_ARGS=" --junit-output=${RESULTS_DIR}/junit_keyring_kmip.xml --junit-package=${DOCKER_OS}.${CMAKE_BUILD_TYPE}.WORKER_${WORKER_NO}.keyring_kmip"
+        else
+            JUNIT_KMIP_ARGS=" --xml-report=${RESULTS_DIR}/junit_keyring_kmip.xml"
+        fi
+        # A report left over from an earlier run on this node must not satisfy the check below.
+        rm -f ${RESULTS_DIR}/junit_keyring_kmip.xml
+
+        echo "Running tests with Cosmian KMIP server"
+        KMIP_MTR_PARALLEL=${KMIP_MTR_PARALLEL:-1}
+        MTR_BUILD_THREAD=auto ./mtr \
+            --force \
+            --max-test-fail=0 \
+            --parallel=$KMIP_MTR_PARALLEL \
+            --retry=0 \
+            ${MTR_ARGS_KK} \
+            ${ANALYZER_MTR_ARGS} \
+            --suite=component_keyring_kmip \
+            ${JUNIT_KMIP_ARGS} || true
+
+        ln -s $PWD/var $PWD/var_kmip
+        rsync -a -L --prune-empty-dirs --include '*/' --include '*.err' --exclude '*' $PWD/var_kmip ${RESULTS_DIR}/mtr_var
+
+        killall -9 mysqld || true
+        rm -rf $PWD/var_kmip
+
+        if [[ ! -s ${RESULTS_DIR}/junit_keyring_kmip.xml ]]; then
+            echo "ERROR: component_keyring_kmip produced no test report; mtr did not run the suite"
+            KMIP_FAILED=1
+        fi
+    fi
+
+    end=`date +%s`
+    runtime=$((end-start))
+    echo KH,SUITE_TOTAL,KEYRING_KMIP_tests,time,$runtime
+fi
+
 rm -fr ${EXTRACT_DIR}/mysql-test/var
 # Keep the extracted tree when REUSE_EXTRACT=yes so the next suite on this worker
 # (dynamic pipeline) doesn't have to re-extract binary.tar.gz.
@@ -680,3 +742,8 @@ fi
 
 ls -l ${WORKDIR}
 ls -l ${RESULTS_DIR}
+
+if [[ -n "${KMIP_FAILED:-}" ]]; then
+    echo "ERROR: KEYRING_KMIP tests could not run, see the errors above"
+    exit 1
+fi
