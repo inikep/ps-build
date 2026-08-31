@@ -62,6 +62,12 @@ SUITE_RESULTS  = []   // per-suite timing for the end-of-run summary: [suite,wor
 // pushed back here and handed out again — before the main queue — so a healthy worker reruns
 // it instead of it being lost. REQUEUE_COUNT caps re-queues per suite so a deterministically
 // broken suite can't bounce forever; past the cap it is recorded as failed (-> rerun/RESUME).
+//
+// Entries are [suite: name, owner: "worker-N"] so nextSuite() can avoid handing a suite
+// straight back to the worker that just failed it: in build 7 a worker whose agent went
+// offline re-picked its own re-queued suite twice within a second, spending both of the
+// suite's attempts on a dead node while ten items and seven healthy workers were waiting,
+// and innodb|nobig (the largest item) never ran at all.
 REQUEUE        = []
 REQUEUE_INDEX  = 0
 REQUEUE_COUNT  = [:]
@@ -100,12 +106,17 @@ HEAVY_SUITES = ['innodb', 'main', 'rpl', 'rocksdb', 'group_replication', 'clone'
 // @NonCPS helpers: pure data manipulation, NO pipeline steps (echo/sh/env/node) inside,
 // and NO Collection mutator calls (see note above).
 @NonCPS
-String nextSuite() {
-    // Re-queued suites (from a failed/killed worker) take priority over the main queue.
+String nextSuite(String owner = '') {
+    // Re-queued suites (from a failed/killed worker) take priority over the main queue - but
+    // never hand one back to the worker that just failed it while anything else is available,
+    // or a sick node keeps reclaiming its own suite and burning its attempts. Taking it back
+    // as a last resort (main queue drained) is still better than leaving it unrun.
     if (REQUEUE_INDEX < REQUEUE.size()) {
-        String s = REQUEUE[REQUEUE_INDEX]
-        REQUEUE_INDEX = REQUEUE_INDEX + 1
-        return s
+        def head = REQUEUE[REQUEUE_INDEX]
+        if (!owner || head.owner != owner || NEXT_INDEX >= ALL_SUITES.size()) {
+            REQUEUE_INDEX = REQUEUE_INDEX + 1
+            return head.suite
+        }
     }
     if (NEXT_INDEX >= ALL_SUITES.size()) {
         return null   // null == queue drained
@@ -134,15 +145,22 @@ void recordFailedSuite(String suite) {
 
 // Push a failed suite back onto the queue for another worker, up to MAX_REQUEUE times.
 // Returns true if re-queued, false if the cap is hit (then it is recorded as failed instead).
+//
+// charge=false re-queues without spending one of the suite's attempts: use it when the
+// failure says nothing about the suite (the agent went offline), since a dead node would
+// otherwise exhaust MAX_REQUEUE in seconds. This cannot loop, because a worker that issues
+// an uncharged re-queue leaves the drain immediately, so each one costs one dead node.
 @NonCPS
-boolean requeueOrFail(String suite) {
+boolean requeueOrFail(String suite, String owner = '', boolean charge = true) {
     int n = (REQUEUE_COUNT[suite] ?: 0)
-    if (n >= MAX_REQUEUE) {
+    if (charge && n >= MAX_REQUEUE) {
         FAILED_SUITES = FAILED_SUITES + [suite]
         return false
     }
-    REQUEUE_COUNT = REQUEUE_COUNT + [(suite): (n + 1)]
-    REQUEUE = REQUEUE + [suite]
+    if (charge) {
+        REQUEUE_COUNT = REQUEUE_COUNT + [(suite): (n + 1)]
+    }
+    REQUEUE = REQUEUE + [[suite: suite, owner: owner]]
     return true
 }
 
@@ -153,7 +171,7 @@ boolean requeueOrFail(String suite) {
 void finalizeOrphans() {
     def leftover = []
     for (int i = REQUEUE_INDEX; i < REQUEUE.size(); i++) {
-        leftover = leftover + [REQUEUE[i]]
+        leftover = leftover + [REQUEUE[i].suite]
     }
     RUNNING_SUITES.each { k, v -> leftover = leftover + [k] }
     FAILED_SUITES = FAILED_SUITES + leftover
@@ -562,6 +580,24 @@ void recordSpecialFailures(boolean ciFs, boolean kv, boolean psProto, boolean st
     if (psProto)    tokens += ['__PS_PROTOCOL__']
     if (standalone) tokens += ['__STANDALONE__']
     FAILED_SUITES = FAILED_SUITES + tokens
+}
+
+// Archive just the finished suite's own logs, immediately. archiveWorkerArtifacts() runs once
+// at the end of the drain, so a node that dies mid-run takes every log the worker produced with
+// it ("archive skipped (node may be down)") - in build 7 that lost component_keyring_file|big
+// and the unit-test run even though both had completed. Only the small per-suite files go out
+// here (console log + valgrind extracts + compressed full log); the mtr_var tarball and the
+// JUnit XMLs still wait for the end, where re-doing them per suite would be wasteful.
+void archiveSuiteLogs(Integer WORKER_ID, String TAG) {
+    sh """#!/bin/bash
+        set +e
+        cd ${WORKSPACE}
+        mkdir -p mtr_logs
+        cp -f ${WORK_DIR}/mtr-test_${TAG}*.log* mtr_logs/ 2>/dev/null
+        exit 0
+    """
+    archiveArtifacts artifacts: 'mtr_logs/*', allowEmptyArchive: true
+    sh "cd ${WORKSPACE} && rm -rf mtr_logs || :"
 }
 
 // Archive everything this worker produced. Per-suite runs set SKIP_RESULTS_TARBALL=yes, so
@@ -1237,13 +1273,14 @@ pipeline {
                                                 int seq = 0
                                                 int consecFail = 0
                                                 String suite
-                                                while ((suite = nextSuite()) != null) {
+                                                while ((suite = nextSuite("worker-${workerId}")) != null) {
                                                     seq++
                                                     echo "[worker ${workerId}] picked '${suite}' (seq ${seq}); ~${queueSize()} left"
                                                     markRunning(suite, "worker-${workerId}")
                                                     updateProgress()
                                                     long t0 = System.currentTimeMillis()
                                                     boolean ok = false
+                                                    boolean nodeGone = false
                                                     try {
                                                         runOneSuite(workerId, seq, suite)
                                                         // Checkpoint only on success: a RESUME run then re-runs both
@@ -1259,6 +1296,16 @@ pipeline {
                                                         throw ie
                                                     } catch (err) {
                                                         echo "[worker ${workerId}] suite '${suite}' errored: ${err}"
+                                                        // Did the agent go away, rather than the suite failing? Matched on
+                                                        // the rendered exception (which carries the class name and the
+                                                        // cause) so no plugin class has to be referenced from the script.
+                                                        String ex = err.toString()
+                                                        nodeGone = ex.contains('AgentOfflineException') ||
+                                                                   ex.contains('ChannelClosedException') ||
+                                                                   ex.contains('RequestAbortedException') ||
+                                                                   ex.contains('was marked offline') ||
+                                                                   ex.contains('Connection was broken') ||
+                                                                   ex.contains('Cannot contact')
                                                     } finally {
                                                         long durSecs = (long)((System.currentTimeMillis() - t0) / 1000)
                                                         // Parse the MTR log for parallelism + timeouts/failures. MTR masks
@@ -1274,6 +1321,12 @@ pipeline {
                                                                   : ((diag.fails as int) > 0 ? 'fail' : 'pass'))
                                                         recordSuiteResult(suite, workerId, seq, durSecs, st,
                                                             diag.spent as int, diag.timeouts as int, diag.fails as int, diag.badTests)
+                                                        // Get this suite's logs off the node now, while it is still
+                                                        // reachable, instead of waiting for the end-of-drain archive.
+                                                        if (ok) {
+                                                            try { archiveSuiteLogs(workerId, suiteTag(workerId, seq, suite)) }
+                                                            catch (e) { echo "[worker ${workerId}] per-suite archive skipped: ${e}" }
+                                                        }
                                                         markDone(suite)
                                                         updateProgress()
                                                     }
@@ -1281,9 +1334,18 @@ pipeline {
                                                         consecFail = 0
                                                     } else {
                                                         unstable("worker ${workerId}: suite '${suite}' failed")
+                                                        // A lost agent says nothing about the suite. Push it back without
+                                                        // charging an attempt and leave the drain at once: retrying here
+                                                        // only spends the suite's remaining attempts on a dead node, which
+                                                        // is how build 7 lost innodb|nobig entirely.
+                                                        if (nodeGone) {
+                                                            requeueOrFail(suite, "worker-${workerId}", false)
+                                                            echo "[worker ${workerId}] node offline - re-queued '${suite}' with no attempt charged, leaving drain"
+                                                            break
+                                                        }
                                                         // Spot-kill hardening: push the suite back for a healthy worker
                                                         // rather than losing it; if it repeatedly fails, give up on it.
-                                                        if (requeueOrFail(suite)) {
+                                                        if (requeueOrFail(suite, "worker-${workerId}")) {
                                                             echo "[worker ${workerId}] re-queued '${suite}' for another worker"
                                                         } else {
                                                             echo "[worker ${workerId}] '${suite}' exceeded re-queue cap; recorded as failed"
