@@ -197,13 +197,16 @@ void sweepRunningToFailed(String owner) {
 }
 
 // Record one suite's result for the end-of-run summary (reassignment, no mutators).
-// The diagnostic fields (spent/timeouts/fails/badTests) default to 0/'' for callers that
-// don't parse them (the special/unit branches); suite workers fill them from the MTR log.
+// The diagnostic fields (spent/timeouts/fails/badTests/flaky/flakyTests) default to 0/'' for
+// callers that don't parse them (the special/unit branches); suite workers fill them from the
+// MTR log.
 @NonCPS
 void recordSuiteResult(String suite, int worker, int seq, long secs, String status,
-                       int spent = 0, int timeouts = 0, int fails = 0, String badTests = '') {
+                       int spent = 0, int timeouts = 0, int fails = 0, String badTests = '',
+                       int flaky = 0, String flakyTests = '') {
     SUITE_RESULTS = SUITE_RESULTS + [[suite: suite, worker: worker, seq: seq, secs: secs, status: status,
-                                      spent: spent, timeouts: timeouts, fails: fails, badTests: badTests]]
+                                      spent: spent, timeouts: timeouts, fails: fails, badTests: badTests,
+                                      flaky: flaky, flakyTests: flakyTests]]
 }
 
 // Right-pad a string to width n using only whitelisted String ops (no String.format).
@@ -226,7 +229,8 @@ String progressLine() {
     if (queued < 0) { queued = 0 }
     // Count real suites only; the unit/CIFS/ps/KV special runs are tagged "(special: ...)".
     def suites = SUITE_RESULTS.findAll { !it.suite.startsWith('(special') }
-    int fail = suites.findAll { it.status != 'pass' }.size()
+    // 'flaky' means MTR retried and passed: not a failure, so it doesn't inflate the count.
+    int fail = suites.findAll { it.status != 'pass' && it.status != 'flaky' }.size()
     def now  = RUNNING_SUITES.collect { k, v -> k }.join(', ')
     return "MTR: ${suites.size()}/${total} suites done (${fail} fail) - " +
            "${running} running - ${queued} queued" + (now ? " - now: ${now}" : '')
@@ -256,12 +260,16 @@ String renderRunSummary() {
         // Groovy "/" yields BigDecimal (75/10 -> 7.5), so use an int-truncating divide for
         // the whole part; r10 % 10 is the tenths. e.g. r10=75 -> "7.5x", r10=8 -> "0.8x".
         String par = spent > 0 ? (((int)(r10 / 10)) + '.' + (r10 % 10) + 'x') : '-'
-        String note = ''
         // NOTE lists every failing test, not just the first, so a row is actionable without
-        // opening the log. A timed-out suite keeps its FAIL count too: the timeout label used
-        // to replace it, which hid e.g. 143 failures behind "TIMEOUT x4".
-        if ((r.timeouts ?: 0) > 0)   note = "TIMEOUT x${r.timeouts} FAIL x${r.fails}: ${r.badTests}"
-        else if ((r.fails ?: 0) > 0) note = "FAIL x${r.fails}: ${r.badTests}"
+        // opening the log, and the labels are additive: a timed-out suite keeps its FAIL count
+        // too (the timeout label used to replace it, which hid e.g. 143 failures behind
+        // "TIMEOUT x4"). FLAKY is MTR's "unstable" verdict - failed, then passed on a retry -
+        // and is reported without failing the row, which is what MTR itself does.
+        def parts = []
+        if ((r.timeouts ?: 0) > 0) { parts += ["TIMEOUT x${r.timeouts}"] }
+        if ((r.fails ?: 0) > 0)    { parts += ["FAIL x${r.fails}: ${r.badTests}"] }
+        if ((r.flaky ?: 0) > 0)    { parts += ["FLAKY x${r.flaky}: ${r.flakyTests}"] }
+        String note = parts.join('  ')
         if (note) { anomalies += ["${r.suite} (w${r.worker}): ${note}"] }
         lines += [pad(r.suite, 38) + pad('w' + r.worker, 8) + pad('' + r.seq, 6) +
                   pad('' + r.secs, 8) + pad(par, 7) + pad(r.status, 9) + note]
@@ -270,7 +278,7 @@ String renderRunSummary() {
     byWorker.each { w, secs -> lines += [pad('worker ' + w, 38) + secs] }
     lines += ["total suite-seconds: ${total}  (items: ${rows.size()})"]
     if (anomalies) {
-        lines += ['---- anomalies (timeouts / failures) ----']
+        lines += ['---- anomalies (timeouts / failures / flaky) ----']
         anomalies.each { lines += [it] }
     }
     return lines.join('\n')
@@ -550,15 +558,18 @@ void runOneSuite(Integer WORKER_ID, Integer SEQ, String SUITE) {
 }
 
 // Parse a finished suite's MTR log + walltime file for the diagnostics table (runs on the
-// worker node, where the files live). Returns spent/timeouts/fails/badTests as strings.
+// worker node, where the files live). Returns spent/timeouts/fails/badTests/flaky/flakyTests
+// as strings; "fails" counts only hard failures, "flaky" the ones MTR passed on a retry.
 def suiteDiagnostics(String tag) {
     String raw = sh(returnStdout: true, script:
-        "bash local/mtr-suite-diag.sh '${WORK_DIR}/walltimes/walltime_${tag}.txt' '${WORK_DIR}/mtr-test_${tag}.log' 2>/dev/null || echo '0|0|0|'").trim()
+        "bash local/mtr-suite-diag.sh '${WORK_DIR}/walltimes/walltime_${tag}.txt' '${WORK_DIR}/mtr-test_${tag}.log' 2>/dev/null || echo '0|0|0||0|'").trim()
     def p = raw.split('\\|')
-    return [spent:    (p.length > 0 && p[0] ? p[0] : '0'),
-            timeouts: (p.length > 1 && p[1] ? p[1] : '0'),
-            fails:    (p.length > 2 && p[2] ? p[2] : '0'),
-            badTests: (p.length > 3 ? p[3] : '')]
+    return [spent:      (p.length > 0 && p[0] ? p[0] : '0'),
+            timeouts:   (p.length > 1 && p[1] ? p[1] : '0'),
+            fails:      (p.length > 2 && p[2] ? p[2] : '0'),
+            badTests:   (p.length > 3 ? p[3] : ''),
+            flaky:      (p.length > 4 && p[4] ? p[4] : '0'),
+            flakyTests: (p.length > 5 ? p[5] : '')]
 }
 
 // Primary-worker-only: unit tests + standalone tests. These need the original build tree
@@ -1311,16 +1322,22 @@ pipeline {
                                                         // Parse the MTR log for parallelism + timeouts/failures. MTR masks
                                                         // test failures (--max-test-fail=0 || true) so runOneSuite returns
                                                         // OK even when tests failed/timed out; the diagnostics recover that.
-                                                        def diag = [spent: '0', timeouts: '0', fails: '0', badTests: '']
+                                                        def diag = [spent: '0', timeouts: '0', fails: '0', badTests: '',
+                                                                    flaky: '0', flakyTests: '']
                                                         if (ok) {
                                                             try { diag = suiteDiagnostics(suiteTag(workerId, seq, suite)) }
                                                             catch (e) { echo "[worker ${workerId}] diag parse skipped: ${e}" }
                                                         }
+                                                        // A suite whose only failures were recovered by a retry is 'flaky',
+                                                        // not 'fail' - MTR doesn't hard-fail the run for those either, so
+                                                        // the row no longer cries "FAIL x1" over a test that ended green.
                                                         String st = !ok ? 'infra-fail'
                                                                   : ((diag.timeouts as int) > 0 ? 'timeout'
-                                                                  : ((diag.fails as int) > 0 ? 'fail' : 'pass'))
+                                                                  : ((diag.fails as int) > 0 ? 'fail'
+                                                                  : ((diag.flaky as int) > 0 ? 'flaky' : 'pass')))
                                                         recordSuiteResult(suite, workerId, seq, durSecs, st,
-                                                            diag.spent as int, diag.timeouts as int, diag.fails as int, diag.badTests)
+                                                            diag.spent as int, diag.timeouts as int, diag.fails as int, diag.badTests,
+                                                            diag.flaky as int, diag.flakyTests)
                                                         // Get this suite's logs off the node now, while it is still
                                                         // reachable, instead of waiting for the end-of-drain archive.
                                                         if (ok) {
