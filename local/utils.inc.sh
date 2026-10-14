@@ -386,3 +386,41 @@ function check_suites() {
 
   return ${failure}
 }
+
+# docker_is_rootless: true when the Docker daemon runs rootless. Files the container writes as
+# mysql are then owned by a subordinate uid the host user cannot read or remove.
+function docker_is_rootless() {
+  docker info -f '{{.SecurityOptions}}' 2>/dev/null | grep -q rootless
+}
+
+# restore_host_ownership [-R] <path>...
+# Hands paths written by a container back to HOST_UID:HOST_GID (default: the current user).
+# Paths that don't exist are skipped. With rootful Docker the chown is a courtesy, so a failure
+# is ignored; under rootless Docker it is required, so a failure is reported (the script
+# usually dies a few lines later with an unrelated-looking "Permission denied" otherwise).
+function restore_host_ownership() {
+  local recursive=""
+  if [[ "$1" == "-R" ]]; then
+    recursive="-R"
+    shift
+  fi
+  local uid=${HOST_UID:-$(id -u)}
+  local gid=${HOST_GID:-$(id -g)}
+  local paths=()
+  local p
+  for p in "$@"; do
+    if [[ -e "$p" ]]; then
+      paths+=("$p")
+    fi
+  done
+  if [[ ${#paths[@]} -eq 0 ]]; then
+    return 0
+  fi
+  if ! sudo chown ${recursive} "${uid}:${gid}" "${paths[@]}" 2>/dev/null; then
+    if docker_is_rootless; then
+      echo "WARNING: chown ${recursive} ${uid}:${gid} ${paths[*]} failed; under rootless Docker" \
+           "the host user may be unable to read or remove these paths" >&2
+    fi
+  fi
+  return 0
+}

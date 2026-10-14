@@ -35,6 +35,10 @@ MAX_S3_RETRIES = 12
 S3_ROOT_DIR = 's3://ps-build-cache'
 // boolean default is false, 1st item unused.
 WORKER_ABORTED = new boolean[9]
+// Tags of the worker-1 special MTR runs (ci_fs, ps_protocol, keyring_vault_*, keyring_kmip)
+// that produced no report, from results/special_failed.txt. Set only when the worker ran to
+// its end, so the rerun can be limited to those specials.
+WORKER_1_FAILED_SPECIALS = ''
 BUILD_NUMBER_BINARIES_FOR_RERUN = 0
 BUILD_TRIGGER_BY = ''
 WORK_DIR = 'work'
@@ -273,6 +277,21 @@ void doTestWorkerJobWithoutGuard(Integer WORKER_ID, String SUITES, String STANDA
             // This is questionable. Do we need result XMLs in S3 cache while Jenkins archives them as well?
             syncDirToS3("./${WORK_DIR}/results/", "${BUILD_TAG_BINARIES}", 'mtr_var/*')
             step([$class: 'JUnitResultArchiver', testResults: "${WORK_DIR}/results/*.xml", healthScaleFactor: 1.0, keepLongStdio: false])
+
+            script {
+                if (WORKER_ID == 1) {
+                    // test-binary-parallel-mtr writes this only after everything else ran and
+                    // right before it exits 1; see triggerAbortedTestWorkersRerun().
+                    try {
+                        WORKER_1_FAILED_SPECIALS = sh(returnStdout: true,
+                            script: "cat ${WORK_DIR}/results/special_failed.txt 2>/dev/null || :").trim()
+                    } catch (err) {
+                        // Node gone: nothing to read, the worker is treated as fully aborted.
+                        WORKER_1_FAILED_SPECIALS = ''
+                    }
+                    echo "WORKER_1_FAILED_SPECIALS = '${WORKER_1_FAILED_SPECIALS}'"
+                }
+            }
 
             // cleanup before marking success
             cleanWorkspace(WORKER_ID)
@@ -533,8 +552,23 @@ void triggerAbortedTestWorkersRerun() {
             def WORKER_6_RERUN_SUITES = ''
             def WORKER_7_RERUN_SUITES = ''
             def WORKER_8_RERUN_SUITES = ''
+            def RERUN_STANDALONE_TESTS = MTR_STANDALONE_TESTS
+            def RERUN_MTR_ARGS = env.MTR_ARGS
 
-            if (WORKER_ABORTED[1]) {
+            if (WORKER_ABORTED[1] && WORKER_1_FAILED_SPECIALS) {
+                // Worker 1 ran its suites, standalone and unit tests to the end; only the listed
+                // special MTR runs produced no report. Rerun just those (the dynamic pipeline
+                // does the same through its __CI_FS__/__KV__/__PS_PROTOCOL__/__KMIP__ tokens).
+                echo "rerun worker 1 specials only: ${WORKER_1_FAILED_SPECIALS}"
+                RERUN_STANDALONE_TESTS = ''
+                RERUN_MTR_ARGS = (env.MTR_ARGS ?: '').replace('--unit-tests-report', '')
+                env.CI_FS_MTR         = WORKER_1_FAILED_SPECIALS.contains('ci_fs')         ? 'yes' : 'no'
+                // KEYRING_VAULT_MTR has no per-variant switch here, so any keyring_vault_* tag reruns all four.
+                env.KEYRING_VAULT_MTR = WORKER_1_FAILED_SPECIALS.contains('keyring_vault') ? 'yes' : 'no'
+                env.WITH_PS_PROTOCOL  = WORKER_1_FAILED_SPECIALS.contains('ps_protocol')   ? 'yes' : 'no'
+                env.KEYRING_KMIP_MTR  = WORKER_1_FAILED_SPECIALS.contains('keyring_kmip')  ? 'yes' : 'no'
+                rerunNeeded = true
+            } else if (WORKER_ABORTED[1]) {
                 echo 'rerun worker 1'
                 WORKER_1_RERUN_SUITES = env.WORKER_1_MTR_SUITES
                 rerunNeeded = true
@@ -602,7 +636,7 @@ void triggerAbortedTestWorkersRerun() {
                             string(name:'WITH_JS_LANG', value: env.WITH_JS_LANG),
                     string(name:'CMAKE_OPTS', value: env.CMAKE_OPTS),
                     string(name:'MAKE_OPTS', value: env.MAKE_OPTS),
-                    string(name:'MTR_ARGS', value: env.MTR_ARGS),
+                    string(name:'MTR_ARGS', value: RERUN_MTR_ARGS),
                     string(name:'CI_FS_MTR', value: env.CI_FS_MTR),
                     string(name:'WITH_PS_PROTOCOL', value: env.WITH_PS_PROTOCOL),
                     string(name:'GALERA_PARALLEL_RUN', value: env.GALERA_PARALLEL_RUN),
@@ -622,7 +656,7 @@ void triggerAbortedTestWorkersRerun() {
                     string(name:'WORKER_6_MTR_SUITES', value: WORKER_6_RERUN_SUITES),
                     string(name:'WORKER_7_MTR_SUITES', value: WORKER_7_RERUN_SUITES),
                     string(name:'WORKER_8_MTR_SUITES', value: WORKER_8_RERUN_SUITES),
-                    string(name:'MTR_STANDALONE_TESTS', value: MTR_STANDALONE_TESTS),
+                    string(name:'MTR_STANDALONE_TESTS', value: RERUN_STANDALONE_TESTS),
                     string(name:'MTR_STANDALONE_TESTS_PARALLEL', value: MTR_STANDALONE_TESTS_PARALLEL),
                     booleanParam(name: 'ALLOW_ABORTED_WORKERS_RERUN', value: false),
                     string(name:'CUSTOM_BUILD_NAME', value: "${BUILD_TRIGGER_BY} ${env.CUSTOM_BUILD_NAME} (${BUILD_NUMBER} retry)")

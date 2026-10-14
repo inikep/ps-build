@@ -51,13 +51,10 @@ if [[ $(uname -m) == "aarch64" ]]; then
 fi
 TEST_IMAGE=public.ecr.aws/e7j3v3n0/ps-build:${SOURCE_IMAGE}${ARCH_SUFFIX}
 
-# For rootless Docker: capture host user/group IDs to fix permissions after tests
-# If HOST_UID not set, use current user (useful for local testing)
-HOST_UID=${HOST_UID:-$(id -u)}
-HOST_GID=${HOST_GID:-$(id -g)}
-
 ROOT_DIR=$(cd $(dirname $0)/..; pwd -P)
 SCRIPTS_DIR=$ROOT_DIR/local
+# restore_host_ownership (HOST_UID/HOST_GID default to the current user), filter_valgrind_log
+source "${SCRIPTS_DIR}/utils.inc.sh"
 # SOURCES_DIR is only required by an original build in ${WORK_DIR}/build to run unit tests
 SOURCES_DIR=$ROOT_DIR/sources
 mkdir -p ${SOURCES_DIR}
@@ -73,10 +70,8 @@ WORK_DIR=${3:-$ROOT_DIR/${SOURCE_IMAGE}_${CMAKE_BUILD_TYPE}}
 restore_ownership() {
     [[ -n "${OWNERSHIP_RESTORED}" ]] && return
     OWNERSHIP_RESTORED=1
-    sudo chown "${HOST_UID}:${HOST_GID}" "${WORK_DIR}" 2>/dev/null || :
-    if [[ -d "${WORK_DIR}/results" ]]; then
-        sudo chown -R "${HOST_UID}:${HOST_GID}" "${WORK_DIR}/results" 2>/dev/null || :
-    fi
+    restore_host_ownership "${WORK_DIR}"
+    restore_host_ownership -R "${WORK_DIR}/results"
 }
 
 # Runs on every exit path, including a failed docker run under errexit/pipefail.
@@ -141,13 +136,14 @@ fi
 
 if [[ "${KEYRING_KMIP_MTR}" == 'yes' ]]; then
     KMIP_ADDR=${KMIP_ADDR:-kms}
-    KMIP_DOCKER_NETWORK=${TEST_DOCKER_NETWORK:-bridge-kmip}
-    TEST_DOCKER_NETWORK=${KMIP_DOCKER_NETWORK}
+    # Share bridge-vault when Vault runs too, otherwise the KMS gets its own network.
+    TEST_DOCKER_NETWORK=${TEST_DOCKER_NETWORK:-bridge-kmip}
 
-    # The test container reaches the KMS by network alias on 5696 (exported by kmip_vars.sh).
-    # The test image itself, already pulled, doubles as the in-network readiness probe.
+    # The test container reaches the KMS by network alias on 5696; the runner takes KMIP_ADDR
+    # and the cert paths from the generated kmip_vars.sh, so nothing KMIP-related is exported
+    # into the container below. The test image, already pulled, doubles as the readiness probe.
     bash "${SCRIPTS_DIR}/bootstrap-cosmian" \
-        --network="${KMIP_DOCKER_NETWORK}" \
+        --network="${TEST_DOCKER_NETWORK}" \
         --container-name="${KMIP_CONTAINER_NAME}" \
         --kmip-address="${KMIP_ADDR}" \
         --certs-dir="${KMIP_CERTS_DIR}" \
@@ -195,7 +191,6 @@ docker run --rm --shm-size=32G \
     export KEYRING_VAULT_MTR='${KEYRING_VAULT_MTR}'
     export KV_VARIANT='${KV_VARIANT}'
     export KEYRING_KMIP_MTR='${KEYRING_KMIP_MTR}'
-    export KMIP_ADDR='${KMIP_ADDR}'
     export WORKER_NO='${WORKER_NO}'
     export VAULT_V1_DEV_ADDRESS='http://vault-dev-v1:9200'
     export VAULT_V2_DEV_ADDRESS='http://vault-dev-v2:9400'
@@ -246,7 +241,6 @@ if [[ "$ANALYZER_OPTS" == *"-DWITH_VALGRIND=ON"* ]]; then
     mv mtr-test_${MTR_RUN_TAG}.log mtr-test_${MTR_RUN_TAG}_full.log
     zstd -c mtr-test_${MTR_RUN_TAG}_full.log > mtr-test_${MTR_RUN_TAG}_full.log.zst
 
-    source ${SCRIPTS_DIR}/utils.inc.sh
     filter_valgrind_log mtr-test_${MTR_RUN_TAG}_full.log mtr-test_${MTR_RUN_TAG}.log
     rm -rf mtr-test_${MTR_RUN_TAG}_full.log
 

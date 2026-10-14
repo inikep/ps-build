@@ -143,6 +143,9 @@ BUILD_DIR=${WORKDIR}/build
 RESULTS_DIR=${WORKDIR}/results
 EXTRACT_DIR=${WORKDIR}/extract
 mkdir -p ${RESULTS_DIR}
+# Written at the end when a special MTR run produced no report; see run_special_mtr.
+SPECIAL_FAILED_FILE=${RESULTS_DIR}/special_failed.txt
+rm -f ${SPECIAL_FAILED_FILE}
 
 echo "*******************************************************"
 echo "Starting tests on worker ${WORKER_NO}"
@@ -408,7 +411,8 @@ fi
 #   The command runs with "|| true" (test failures are reported through the XML), so a run
 #   that did not produce a report at all (mtr died before or while running the tests) is
 #   recorded in SPECIAL_FAILED instead. The script fails at its very end, after the mtr_var
-#   tarball has been written.
+#   tarball has been written, and lists the failed tags in results/special_failed.txt so the
+#   static pipeline can rerun just those specials instead of the whole worker.
 SPECIAL_FAILED=""
 function special_failed() {
     echo "ERROR: $1: $2"
@@ -432,11 +436,15 @@ function run_special_mtr() {
 
     MTR_BUILD_THREAD=auto "$@" ${report_args} || true
 
-    ln -s "${vardir}" $PWD/var_${tag}
-    rsync -a -L --prune-empty-dirs --include '*/' --include '*.err' --exclude '*' $PWD/var_${tag} ${RESULTS_DIR}/mtr_var
+    # mtr that died at startup leaves no vardir. Linking it anyway would give rsync -L a
+    # dangling link (exit 23) and errexit would abort the worker before the mtr_var tarball.
+    if [[ -d "${vardir}" ]]; then
+        ln -s "${vardir}" $PWD/var_${tag}
+        rsync -a -L --prune-empty-dirs --include '*/' --include '*.err' --exclude '*' $PWD/var_${tag} ${RESULTS_DIR}/mtr_var
+        rm -rf $PWD/var_${tag}
+    fi
 
     killall -9 mysqld || true
-    rm -rf $PWD/var_${tag}
 
     if [[ ! -s "${report}" ]]; then
         special_failed "${tag}" "mtr produced no test report"
@@ -629,22 +637,24 @@ if [[ ${KEYRING_KMIP_MTR} == 'yes' ]]; then
         MTR_ARGS_KK+=" --big-test"
     fi
 
-    if [[ ! -f /tmp/certs/kmip_vars.sh ]]; then
+    if [[ ! -d ${EXTRACT_DIR}/mysql-test/suite/component_keyring_kmip ]]; then
+        # Trees before the KMIP component have no suite; that is a property of the tree, not
+        # a failure, so skip (like PS protocol on 5.7) rather than fail and trigger a rerun.
+        echo "KEYRING_KMIP_MTR=yes but this tree has no component_keyring_kmip suite, skipping"
+    elif [[ ! -f /tmp/certs/kmip_vars.sh ]]; then
         # docker/run-test-parallel-mtr mounts the certs dir whenever KEYRING_KMIP_MTR=yes.
         special_failed keyring_kmip "/tmp/certs/kmip_vars.sh not found; bootstrap-cosmian did not prepare the KMIP runtime"
-    elif [[ ! -d ${EXTRACT_DIR}/mysql-test/suite/component_keyring_kmip ]]; then
-        special_failed keyring_kmip "KEYRING_KMIP_MTR=yes but this tree has no component_keyring_kmip suite"
     else
         # Exports KMIP_ADDR/KMIP_PORT/KMIP_CLIENT_CA/KMIP_CLIENT_KEY/KMIP_SERVER_CA for the suite.
         source /tmp/certs/kmip_vars.sh
 
         echo "Running tests with Cosmian KMIP server"
-        KMIP_MTR_PARALLEL=${KMIP_MTR_PARALLEL:-1}
+        # Serial by design: the tests rotate master keys on one shared KMS.
         run_special_mtr keyring_kmip $PWD/var \
             ./mtr \
             --force \
             --max-test-fail=0 \
-            --parallel=$KMIP_MTR_PARALLEL \
+            --parallel=1 \
             --retry=0 \
             ${MTR_ARGS_KK} \
             ${ANALYZER_MTR_ARGS} \
@@ -675,5 +685,7 @@ ls -l ${RESULTS_DIR}
 
 if [[ -n "${SPECIAL_FAILED}" ]]; then
     echo "ERROR: special MTR runs did not complete:${SPECIAL_FAILED}, see the errors above"
+    # One tag per line; everything else in this invocation ran to completion.
+    echo ${SPECIAL_FAILED} | tr ' ' '\n' > ${SPECIAL_FAILED_FILE}
     exit 1
 fi
